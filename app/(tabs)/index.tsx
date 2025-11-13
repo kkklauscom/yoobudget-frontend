@@ -99,15 +99,16 @@ export default function HomeScreen() {
     try {
       setCycleLoading(true);
       const cycleData = await IncomeService.getViewCycle();
-      setViewCycle(cycleData);
-    } catch (error: any) {
-      console.error('Failed to fetch view cycle:', error);
-      // If error is "NO_MAIN_INCOME", set viewCycle to null to show empty state
-      if (error?.message?.includes('main income') || error?.message?.includes('NO_MAIN_INCOME')) {
+      // Check if cycle data has error (NO_MAIN_INCOME)
+      if (cycleData.error) {
         setViewCycle(null);
       } else {
-        setViewCycle(null);
+        setViewCycle(cycleData);
       }
+    } catch (error: any) {
+      console.error('Failed to fetch view cycle:', error);
+      // Set viewCycle to null to show empty state
+      setViewCycle(null);
     } finally {
       setCycleLoading(false);
     }

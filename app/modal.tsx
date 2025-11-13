@@ -58,51 +58,52 @@ const WebDateInput = ({
     return `${year}-${month}-${day}`;
   };
 
-  // For Web, use TextInput and modify it to be a date input
-  if (Platform.OS === 'web') {
-    useEffect(() => {
-      if (inputRef.current && typeof document !== 'undefined') {
-        // Get the underlying DOM element
-        const element = inputRef.current;
-        // Try different ways to access the DOM node
-        const domNode = 
-          element?._nativeNode ||
-          element?._node ||
-          (element?.getNativeRef?.()) ||
-          (typeof element === 'object' && 'setNativeProps' in element ? null : element);
-        
-        // If we can access the DOM directly, set type="date"
-        if (domNode && typeof domNode.setAttribute === 'function') {
-          domNode.setAttribute('type', 'date');
-          if (minimumDate) {
-            domNode.setAttribute('min', formatMinDate(minimumDate)!);
-          }
-          if (maximumDate) {
-            domNode.setAttribute('max', formatMaxDate(maximumDate)!);
-          }
-          if (disabled) {
-            domNode.setAttribute('disabled', 'true');
-          } else {
-            domNode.removeAttribute('disabled');
-          }
-        } else if (element && typeof element.setNativeProps === 'function') {
-          // Try using setNativeProps (react-native-web might support this)
-          try {
-            element.setNativeProps({
-              type: 'date',
-              min: formatMinDate(minimumDate),
-              max: formatMaxDate(maximumDate),
-              disabled: disabled,
-            } as any);
-          } catch (e) {
-            // Fallback if setNativeProps doesn't work
-            console.log('setNativeProps not supported');
-          }
+  // Always call useEffect (React Hook rules)
+  useEffect(() => {
+    // Only run on Web platform
+    if (Platform.OS === 'web' && inputRef.current && typeof document !== 'undefined') {
+      // Get the underlying DOM element
+      const element = inputRef.current;
+      // Try different ways to access the DOM node
+      const domNode = 
+        element?._nativeNode ||
+        element?._node ||
+        (element?.getNativeRef?.()) ||
+        (typeof element === 'object' && 'setNativeProps' in element ? null : element);
+      
+      // If we can access the DOM directly, set type="date"
+      if (domNode && typeof domNode.setAttribute === 'function') {
+        domNode.setAttribute('type', 'date');
+        if (minimumDate) {
+          domNode.setAttribute('min', formatMinDate(minimumDate)!);
+        }
+        if (maximumDate) {
+          domNode.setAttribute('max', formatMaxDate(maximumDate)!);
+        }
+        if (disabled) {
+          domNode.setAttribute('disabled', 'true');
+        } else {
+          domNode.removeAttribute('disabled');
+        }
+      } else if (element && typeof element.setNativeProps === 'function') {
+        // Try using setNativeProps (react-native-web might support this)
+        try {
+          element.setNativeProps({
+            type: 'date',
+            min: formatMinDate(minimumDate),
+            max: formatMaxDate(maximumDate),
+            disabled: disabled,
+          } as any);
+        } catch {
+          // Fallback if setNativeProps doesn't work
+          // Silently fail
         }
       }
-    }, [value, minimumDate, maximumDate, disabled]);
+    }
+  }, [value, minimumDate, maximumDate, disabled]);
 
-    // Use TextInput - on Web it renders as HTML input
+  // For Web, use TextInput - on Web it renders as HTML input
+  if (Platform.OS === 'web') {
     return (
       <TextInput
         ref={inputRef}
@@ -115,13 +116,14 @@ const WebDateInput = ({
         }}
         style={[styles.input, disabled && styles.inputDisabled]}
         // @ts-ignore - Web specific props that react-native-web might support
-        type={Platform.OS === 'web' ? 'date' : undefined}
-        min={Platform.OS === 'web' ? formatMinDate(minimumDate) : undefined}
-        max={Platform.OS === 'web' ? formatMaxDate(maximumDate) : undefined}
+        type="date"
+        min={formatMinDate(minimumDate)}
+        max={formatMaxDate(maximumDate)}
       />
     );
   }
 
+  // For non-web platforms, return null (will use DateTimePicker instead)
   return null;
 };
 

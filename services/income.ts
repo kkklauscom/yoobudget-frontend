@@ -46,6 +46,7 @@ export interface IncomeError {
 /**
  * Get all incomes
  * According to API docs: GET /api/income
+ * Returns: Array of Income objects
  * Requires: Authorization: Bearer TOKEN
  */
 export async function getAllIncomes(): Promise<Income[]> {
@@ -63,7 +64,7 @@ export async function getAllIncomes(): Promise<Income[]> {
       },
     });
 
-    let result: { incomes: Income[] } & IncomeError;
+    let result: Income[] | IncomeError;
     try {
       result = await response.json();
     } catch (jsonError) {
@@ -71,11 +72,21 @@ export async function getAllIncomes(): Promise<Income[]> {
     }
 
     if (!response.ok) {
-      const errorMessage = result.error || 'Failed to get incomes';
+      const errorMessage = (result as IncomeError).error || 'Failed to get incomes';
       throw new Error(errorMessage);
     }
 
-    return result.incomes || [];
+    // API returns array directly
+    if (Array.isArray(result)) {
+      return result;
+    }
+
+    // Fallback: check if it's an error object
+    if ((result as IncomeError).error) {
+      throw new Error((result as IncomeError).error!);
+    }
+
+    return [];
   } catch (error: any) {
     console.error('Get incomes error:', error);
     if (error instanceof Error) {
@@ -88,6 +99,7 @@ export async function getAllIncomes(): Promise<Income[]> {
 /**
  * Get view cycle information
  * According to API docs: GET /api/income/view-cycle
+ * Returns: ViewCycleResponse object or error if no main income
  * Requires: Authorization: Bearer TOKEN
  */
 export async function getViewCycle(): Promise<ViewCycleResponse> {
@@ -105,7 +117,7 @@ export async function getViewCycle(): Promise<ViewCycleResponse> {
       },
     });
 
-    let result: ViewCycleResponse & IncomeError;
+    let result: ViewCycleResponse | IncomeError;
     try {
       result = await response.json();
     } catch (jsonError) {
@@ -113,14 +125,37 @@ export async function getViewCycle(): Promise<ViewCycleResponse> {
     }
 
     if (!response.ok) {
-      const errorMessage = result.error || 'Failed to get view cycle';
+      const errorMessage = (result as IncomeError).error || 'Failed to get view cycle';
+      // Check for NO_MAIN_INCOME error
+      if (errorMessage.includes('NO_MAIN_INCOME') || errorMessage.includes('main income')) {
+        return {
+          cycleStart: '',
+          cycleEnd: '',
+          payCycle: 'monthly',
+          remainingDays: 0,
+          totalIncome: 0,
+          error: 'NO_MAIN_INCOME',
+        };
+      }
       throw new Error(errorMessage);
     }
 
-    return result;
+    // API returns ViewCycleResponse directly
+    return result as ViewCycleResponse;
   } catch (error: any) {
     console.error('Get view cycle error:', error);
     if (error instanceof Error) {
+      // If error message indicates no main income, return error object
+      if (error.message.includes('NO_MAIN_INCOME') || error.message.includes('main income')) {
+        return {
+          cycleStart: '',
+          cycleEnd: '',
+          payCycle: 'monthly',
+          remainingDays: 0,
+          totalIncome: 0,
+          error: 'NO_MAIN_INCOME',
+        };
+      }
       throw error;
     }
     throw new Error('Failed to get view cycle.');
@@ -130,9 +165,10 @@ export async function getViewCycle(): Promise<ViewCycleResponse> {
 /**
  * Set income as main
  * According to API docs: POST /api/income/set-main/:id
+ * Returns: Updated Income object
  * Requires: Authorization: Bearer TOKEN
  */
-export async function setMainIncome(id: string): Promise<void> {
+export async function setMainIncome(id: string): Promise<Income> {
   try {
     const token = await getToken();
     if (!token) {
@@ -147,7 +183,7 @@ export async function setMainIncome(id: string): Promise<void> {
       },
     });
 
-    let result: { message?: string } & IncomeError;
+    let result: Income | IncomeError;
     try {
       result = await response.json();
     } catch (jsonError) {
@@ -155,9 +191,12 @@ export async function setMainIncome(id: string): Promise<void> {
     }
 
     if (!response.ok) {
-      const errorMessage = result.error || 'Failed to set main income';
+      const errorMessage = (result as IncomeError).error || 'Failed to set main income';
       throw new Error(errorMessage);
     }
+
+    // API returns Income object directly
+    return result as Income;
   } catch (error: any) {
     console.error('Set main income error:', error);
     if (error instanceof Error) {
@@ -169,7 +208,8 @@ export async function setMainIncome(id: string): Promise<void> {
 
 /**
  * Create income
- * According to API docs: POST /api/income/add
+ * According to API docs: POST /api/income
+ * Returns: Created Income object
  * Requires: Authorization: Bearer TOKEN
  */
 export async function createIncome(data: CreateIncomeData): Promise<Income> {
@@ -188,7 +228,7 @@ export async function createIncome(data: CreateIncomeData): Promise<Income> {
       body: JSON.stringify(data),
     });
 
-    let result: { income: Income } & IncomeError;
+    let result: Income | IncomeError;
     try {
       result = await response.json();
     } catch (jsonError) {
@@ -196,11 +236,12 @@ export async function createIncome(data: CreateIncomeData): Promise<Income> {
     }
 
     if (!response.ok) {
-      const errorMessage = result.error || 'Failed to create income';
+      const errorMessage = (result as IncomeError).error || 'Failed to create income';
       throw new Error(errorMessage);
     }
 
-    return result.income;
+    // API returns Income object directly
+    return result as Income;
   } catch (error: any) {
     console.error('Create income error:', error);
     if (error instanceof Error) {
@@ -213,6 +254,7 @@ export async function createIncome(data: CreateIncomeData): Promise<Income> {
 /**
  * Update income
  * According to API docs: PUT /api/income/:id
+ * Returns: Updated Income object
  * Requires: Authorization: Bearer TOKEN
  */
 export async function updateIncome(id: string, data: UpdateIncomeData): Promise<Income> {
@@ -231,7 +273,7 @@ export async function updateIncome(id: string, data: UpdateIncomeData): Promise<
       body: JSON.stringify(data),
     });
 
-    let result: { income: Income } & IncomeError;
+    let result: Income | IncomeError;
     try {
       result = await response.json();
     } catch (jsonError) {
@@ -239,11 +281,12 @@ export async function updateIncome(id: string, data: UpdateIncomeData): Promise<
     }
 
     if (!response.ok) {
-      const errorMessage = result.error || 'Failed to update income';
+      const errorMessage = (result as IncomeError).error || 'Failed to update income';
       throw new Error(errorMessage);
     }
 
-    return result.income;
+    // API returns Income object directly
+    return result as Income;
   } catch (error: any) {
     console.error('Update income error:', error);
     if (error instanceof Error) {
