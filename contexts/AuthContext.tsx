@@ -7,7 +7,8 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string, budgetRatio: BudgetRatio, viewCycle: string, currentSavings?: number) => Promise<void>;
+  register: (email: string, password: string, name: string, budgetRatio: BudgetRatio, currentSavings?: number) => Promise<void>;
+  updateUserSettings: (data: { name?: string; budgetRatio?: BudgetRatio }) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -45,20 +46,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async (email: string, password: string, name: string, budgetRatio: BudgetRatio, viewCycle: string, currentSavings?: number) => {
+  const register = async (email: string, password: string, name: string, budgetRatio: BudgetRatio, currentSavings?: number) => {
     try {
       const response = await AuthService.register({
         email,
         password,
         name,
         budgetRatio,
-        viewCycle,
         currentSavings,
       });
       // Registration now returns token and user data
       setUser(response.user);
     } catch (error) {
       console.error('Register error:', error);
+      throw error;
+    }
+  };
+
+  const updateUserSettings = async (data: { name?: string; budgetRatio?: BudgetRatio }) => {
+    try {
+      const updatedUser = await AuthService.updateUser(data);
+      setUser(updatedUser);
+    } catch (error) {
+      console.error('Update user error:', error);
       throw error;
     }
   };
@@ -81,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         login,
         register,
+        updateUserSettings,
         logout,
       }}
     >

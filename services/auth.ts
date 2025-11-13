@@ -13,7 +13,6 @@ export interface User {
   name: string;
   budgetRatio: BudgetRatio;
   currentSavings: number;
-  viewCycle: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,7 +22,6 @@ export interface RegisterData {
   password: string;
   name: string;
   budgetRatio: BudgetRatio;
-  viewCycle: string;
   currentSavings?: number;
 }
 
@@ -52,19 +50,25 @@ const USER_KEY = '@user_data';
  */
 export async function register(data: RegisterData): Promise<AuthResponse> {
   try {
+    // Build request body
+    const requestBody: any = {
+      email: data.email,
+      password: data.password,
+      name: data.name,
+      budgetRatio: data.budgetRatio,
+    };
+
+    // Add currentSavings if provided
+    if (data.currentSavings !== undefined) {
+      requestBody.currentSavings = data.currentSavings;
+    }
+
     const response = await fetch(API_CONFIG.AUTH.REGISTER, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        email: data.email,
-        password: data.password,
-        name: data.name,
-        budgetRatio: data.budgetRatio,
-        viewCycle: data.viewCycle,
-        ...(data.currentSavings !== undefined && { currentSavings: data.currentSavings }),
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     let result: AuthResponse & AuthError;
@@ -257,12 +261,21 @@ export async function getCurrentUser(): Promise<User> {
 export async function updateUser(data: {
   name?: string;
   budgetRatio?: BudgetRatio;
-  viewCycle?: string;
 }): Promise<User> {
   try {
     const token = await getToken();
     if (!token) {
       throw new Error('No token available');
+    }
+
+    // Build request body
+    const requestBody: any = {};
+    
+    if (data.name !== undefined) {
+      requestBody.name = data.name;
+    }
+    if (data.budgetRatio !== undefined) {
+      requestBody.budgetRatio = data.budgetRatio;
     }
 
     const response = await fetch(API_CONFIG.USERS.ME, {
@@ -271,7 +284,7 @@ export async function updateUser(data: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(requestBody),
     });
 
     let result: User & AuthError;

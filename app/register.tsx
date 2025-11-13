@@ -27,7 +27,6 @@ export default function RegisterScreen() {
   const [wants, setWants] = useState(30);
   const [savings, setSavings] = useState(20);
   const [currentSavings, setCurrentSavings] = useState("0");
-  const [viewCycle, setViewCycle] = useState("weekly");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -169,7 +168,6 @@ export default function RegisterScreen() {
           wants,
           savings,
         },
-        viewCycle,
         currentSavingsNum
       );
       // Registration successful - user is automatically logged in
@@ -409,72 +407,6 @@ export default function RegisterScreen() {
                 keyboardType="decimal-pad"
                 editable={!loading}
               />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>View Cycle</Text>
-              <View style={styles.radioGroup}>
-                <Pressable
-                  style={[
-                    styles.radioOption,
-                    viewCycle === "weekly" && styles.radioOptionSelected,
-                  ]}
-                  onPress={() => {
-                    setViewCycle("weekly");
-                    setErrorMessage("");
-                  }}
-                  disabled={loading}
-                >
-                  <Text
-                    style={[
-                      styles.radioText,
-                      viewCycle === "weekly" && styles.radioTextSelected,
-                    ]}
-                  >
-                    Weekly
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.radioOption,
-                    viewCycle === "fortnightly" && styles.radioOptionSelected,
-                  ]}
-                  onPress={() => {
-                    setViewCycle("fortnightly");
-                    setErrorMessage("");
-                  }}
-                  disabled={loading}
-                >
-                  <Text
-                    style={[
-                      styles.radioText,
-                      viewCycle === "fortnightly" && styles.radioTextSelected,
-                    ]}
-                  >
-                    Fortnightly
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.radioOption,
-                    viewCycle === "monthly" && styles.radioOptionSelected,
-                  ]}
-                  onPress={() => {
-                    setViewCycle("monthly");
-                    setErrorMessage("");
-                  }}
-                  disabled={loading}
-                >
-                  <Text
-                    style={[
-                      styles.radioText,
-                      viewCycle === "monthly" && styles.radioTextSelected,
-                    ]}
-                  >
-                    Monthly
-                  </Text>
-                </Pressable>
-              </View>
             </View>
 
             <Pressable

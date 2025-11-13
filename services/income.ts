@@ -1,65 +1,43 @@
 import { API_CONFIG } from '@/config/api';
 import { getToken } from './auth';
 
-export type IncomeType = 'recurring' | 'one-time';
-export type Frequency = 'weekly' | 'fortnightly' | 'monthly' | 'yearly';
+export type PayCycle = 'weekly' | 'biweekly' | 'monthly' | 'one-time';
 
-export interface RecurringIncome {
+export interface Income {
   _id: string;
-  type: 'recurring';
   name?: string;
   amount: number;
-  frequency: Frequency;
-  isFirstPayDay: boolean;
+  payCycle: PayCycle;
   nextPayDate: string;
-  lastPayDate: string | null;
+  isMain: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export interface OneTimeIncome {
-  _id: string;
-  type: 'one-time';
+export interface CreateIncomeData {
   name?: string;
   amount: number;
-  oneTimeDate: string;
-}
-
-export type Income = RecurringIncome | OneTimeIncome;
-
-export interface CreateRecurringIncomeData {
-  type: 'recurring';
-  name?: string;
-  amount: number;
-  frequency: Frequency;
-  isFirstPayDay: boolean;
+  payCycle: PayCycle;
   nextPayDate: string;
-  lastPayDate?: string | null;
+  isMain: boolean;
 }
 
-export interface CreateOneTimeIncomeData {
-  type: 'one-time';
-  name?: string;
-  amount: number;
-  oneTimeDate: string;
-}
-
-export type CreateIncomeData = CreateRecurringIncomeData | CreateOneTimeIncomeData;
-
-export interface UpdateRecurringIncomeData {
+export interface UpdateIncomeData {
   name?: string;
   amount?: number;
-  frequency?: Frequency;
-  isFirstPayDay?: boolean;
+  payCycle?: PayCycle;
   nextPayDate?: string;
-  lastPayDate?: string | null;
+  isMain?: boolean;
 }
 
-export interface UpdateOneTimeIncomeData {
-  name?: string;
-  amount?: number;
-  oneTimeDate?: string;
+export interface ViewCycleResponse {
+  cycleStart: string;
+  cycleEnd: string;
+  payCycle: PayCycle;
+  remainingDays: number;
+  totalIncome: number;
+  error?: string;
 }
-
-export type UpdateIncomeData = UpdateRecurringIncomeData | UpdateOneTimeIncomeData;
 
 export interface IncomeError {
   error?: string;
@@ -108,8 +86,90 @@ export async function getAllIncomes(): Promise<Income[]> {
 }
 
 /**
+ * Get view cycle information
+ * According to API docs: GET /api/income/view-cycle
+ * Requires: Authorization: Bearer TOKEN
+ */
+export async function getViewCycle(): Promise<ViewCycleResponse> {
+  try {
+    const token = await getToken();
+    if (!token) {
+      throw new Error('No token available');
+    }
+
+    const response = await fetch(API_CONFIG.INCOME.VIEW_CYCLE, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    let result: ViewCycleResponse & IncomeError;
+    try {
+      result = await response.json();
+    } catch (jsonError) {
+      throw new Error('Failed to connect to server. Please check your connection.');
+    }
+
+    if (!response.ok) {
+      const errorMessage = result.error || 'Failed to get view cycle';
+      throw new Error(errorMessage);
+    }
+
+    return result;
+  } catch (error: any) {
+    console.error('Get view cycle error:', error);
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('Failed to get view cycle.');
+  }
+}
+
+/**
+ * Set income as main
+ * According to API docs: POST /api/income/set-main/:id
+ * Requires: Authorization: Bearer TOKEN
+ */
+export async function setMainIncome(id: string): Promise<void> {
+  try {
+    const token = await getToken();
+    if (!token) {
+      throw new Error('No token available');
+    }
+
+    const response = await fetch(API_CONFIG.INCOME.SET_MAIN(id), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    let result: { message?: string } & IncomeError;
+    try {
+      result = await response.json();
+    } catch (jsonError) {
+      throw new Error('Failed to connect to server. Please check your connection.');
+    }
+
+    if (!response.ok) {
+      const errorMessage = result.error || 'Failed to set main income';
+      throw new Error(errorMessage);
+    }
+  } catch (error: any) {
+    console.error('Set main income error:', error);
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('Failed to set main income.');
+  }
+}
+
+/**
  * Create income
- * According to API docs: POST /api/income
+ * According to API docs: POST /api/income/add
  * Requires: Authorization: Bearer TOKEN
  */
 export async function createIncome(data: CreateIncomeData): Promise<Income> {
@@ -119,7 +179,7 @@ export async function createIncome(data: CreateIncomeData): Promise<Income> {
       throw new Error('No token available');
     }
 
-    const response = await fetch(API_CONFIG.INCOME.BASE, {
+    const response = await fetch(API_CONFIG.INCOME.ADD, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

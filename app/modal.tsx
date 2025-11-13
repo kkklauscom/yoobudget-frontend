@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -15,7 +16,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import * as IncomeService from '@/services/income';
-import type { IncomeType, Frequency } from '@/services/income';
+import * as SpendingService from '@/services/spending';
+import type { PayCycle } from '@/services/income';
 
 // Web date input component - uses native HTML input element via TextInput
 const WebDateInput = ({
@@ -123,16 +125,32 @@ const WebDateInput = ({
   return null;
 };
 
-const FREQUENCY_OPTIONS: { label: string; value: Frequency }[] = [
+const PAY_CYCLE_OPTIONS: { label: string; value: PayCycle }[] = [
   { label: 'Weekly', value: 'weekly' },
-  { label: 'Fortnightly', value: 'fortnightly' },
+  { label: 'Biweekly', value: 'biweekly' },
   { label: 'Monthly', value: 'monthly' },
-  { label: 'Yearly', value: 'yearly' },
+  { label: 'One-Time', value: 'one-time' },
+];
+
+// Expense categories
+const EXPENSE_CATEGORIES = [
+  { label: 'Food', value: 'food' },
+  { label: 'Transport', value: 'transport' },
+  { label: 'Shopping', value: 'shopping' },
+  { label: 'Bills', value: 'bills' },
+  { label: 'Entertainment', value: 'entertainment' },
+  { label: 'Health', value: 'health' },
+  { label: 'Education', value: 'education' },
+  { label: 'Other', value: 'other' },
 ];
 
 export default function ModalScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ type?: string }>();
   const { user } = useAuth();
+  
+  // Determine if this is for income or expense
+  const modalType = params.type === 'expense' ? 'expense' : 'income';
   
   // Get today's date at midnight to ensure we can select today
   const getToday = () => {
@@ -141,22 +159,20 @@ export default function ModalScreen() {
     return today;
   };
   
-  const [incomeType, setIncomeType] = useState<IncomeType>('recurring');
+  // Common states
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
-  const [frequency, setFrequency] = useState<Frequency>('monthly');
-  const [isFirstPayDay, setIsFirstPayDay] = useState(true);
-  const [nextPayDate, setNextPayDate] = useState(getToday());
-  const [lastPayDate, setLastPayDate] = useState<Date | null>(null);
-  const [oneTimeDate, setOneTimeDate] = useState(getToday());
-  
-  // Date picker states
-  const [showNextPayDatePicker, setShowNextPayDatePicker] = useState(false);
-  const [showLastPayDatePicker, setShowLastPayDatePicker] = useState(false);
-  const [showOneTimeDatePicker, setShowOneTimeDatePicker] = useState(false);
-  
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  
+  // Income-specific states
+  const [payCycle, setPayCycle] = useState<PayCycle>('monthly');
+  const [nextPayDate, setNextPayDate] = useState(getToday());
+  const [isMain, setIsMain] = useState(false);
+  const [showNextPayDatePicker, setShowNextPayDatePicker] = useState(false);
+  
+  // Expense-specific states
+  const [category, setCategory] = useState<string>('food');
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -175,29 +191,13 @@ export default function ModalScreen() {
 
   const handleSubmit = async () => {
     // Validation
+    if (!name || name.trim() === '') {
+      showAlert('Error', `Please enter a ${modalType === 'expense' ? 'expense' : 'income'} name`);
+      return;
+    }
+
     if (!amount || parseFloat(amount) <= 0) {
       showAlert('Error', 'Please enter a valid amount');
-      return;
-    }
-
-    // Validate next pay date is not in the past
-    const today = getToday();
-    if (incomeType === 'recurring') {
-      const nextPayDateOnly = new Date(nextPayDate);
-      nextPayDateOnly.setHours(0, 0, 0, 0);
-      if (nextPayDateOnly < today) {
-        showAlert('Error', 'Next pay date cannot be in the past');
-        return;
-      }
-    }
-
-    if (incomeType === 'recurring' && !isFirstPayDay && !lastPayDate) {
-      showAlert('Error', 'Please select last pay date');
-      return;
-    }
-
-    if (incomeType === 'recurring' && !isFirstPayDay && lastPayDate && nextPayDate <= lastPayDate) {
-      showAlert('Error', 'Next pay date must be later than last pay date');
       return;
     }
 
@@ -205,31 +205,51 @@ export default function ModalScreen() {
     setErrorMessage('');
 
     try {
-      if (incomeType === 'recurring') {
-        const data: IncomeService.CreateRecurringIncomeData = {
-          type: 'recurring',
-          name: name || undefined,
+      if (modalType === 'expense') {
+        // Create expense
+        const spendingDate = new Date().toISOString().split('T')[0]; // Format as YYYY-MM-DD
+        const data: SpendingService.CreateSpendingData = {
+          name: name.trim(),
           amount: parseFloat(amount),
-          frequency,
-          isFirstPayDay,
-          nextPayDate: formatDate(nextPayDate),
-          lastPayDate: isFirstPayDay ? null : (lastPayDate ? formatDate(lastPayDate) : null),
+          category,
+          spendingDate,
         };
-        await IncomeService.createIncome(data);
+        await SpendingService.createSpending(data);
       } else {
-        const data: IncomeService.CreateOneTimeIncomeData = {
-          type: 'one-time',
-          name: name || undefined,
+        // Create income
+        // Validate next pay date is not in the past (only for non-one-time)
+        const today = getToday();
+        if (payCycle !== 'one-time') {
+          const nextPayDateOnly = new Date(nextPayDate);
+          nextPayDateOnly.setHours(0, 0, 0, 0);
+          if (nextPayDateOnly < today) {
+            showAlert('Error', 'Next pay date cannot be in the past');
+            setLoading(false);
+            return;
+          }
+        }
+
+        // One-time income cannot be main
+        if (payCycle === 'one-time' && isMain) {
+          showAlert('Error', 'One-time income cannot be set as main income');
+          setLoading(false);
+          return;
+        }
+
+        const data: IncomeService.CreateIncomeData = {
+          name: name.trim() || undefined,
           amount: parseFloat(amount),
-          oneTimeDate: formatDate(oneTimeDate),
+          payCycle,
+          nextPayDate: formatDate(nextPayDate),
+          isMain: payCycle === 'one-time' ? false : isMain, // One-time cannot be main
         };
         await IncomeService.createIncome(data);
       }
 
-      // Success - go back to home
+      // Success - go back
       router.back();
     } catch (error: any) {
-      const errorMsg = error?.message || 'Failed to create income';
+      const errorMsg = error?.message || `Failed to create ${modalType}`;
       setErrorMessage(errorMsg);
       showAlert('Error', errorMsg);
     } finally {
@@ -247,11 +267,15 @@ export default function ModalScreen() {
           <Pressable onPress={() => router.back()} style={styles.closeButton}>
             <Text style={styles.closeText}>✕</Text>
           </Pressable>
-          <Text style={styles.title}>Add Income</Text>
+          <Text style={styles.title}>
+            {modalType === 'expense' ? 'Add Expense' : 'Add Income'}
+          </Text>
         </View>
 
         <Text style={styles.description}>
-          Record a one-time or recurring income
+          {modalType === 'expense' 
+            ? 'Add a new expense'
+            : 'Add a new income source'}
         </Text>
 
         {errorMessage ? (
@@ -260,53 +284,14 @@ export default function ModalScreen() {
           </View>
         ) : null}
 
-        <View style={styles.segment}>
-          <Pressable
-            style={[
-              styles.segmentOption,
-              incomeType === 'recurring' && styles.segmentOptionActive,
-            ]}
-            onPress={() => {
-              setIncomeType('recurring');
-              setErrorMessage('');
-            }}
-          >
-            <Text
-              style={[
-                styles.segmentLabel,
-                incomeType === 'recurring' && styles.segmentLabelActive,
-              ]}
-            >
-              Recurring
-            </Text>
-            <Text style={styles.segmentCaption}>Regular income</Text>
-          </Pressable>
-          <Pressable
-            style={[
-              styles.segmentOption,
-              incomeType === 'one-time' && styles.segmentOptionActive,
-            ]}
-            onPress={() => {
-              setIncomeType('one-time');
-              setErrorMessage('');
-            }}
-          >
-            <Text
-              style={[
-                styles.segmentLabel,
-                incomeType === 'one-time' && styles.segmentLabelActive,
-              ]}
-            >
-              One-Time
-            </Text>
-            <Text style={styles.segmentCaption}>Single income</Text>
-          </Pressable>
-        </View>
-
         <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Income Name (Optional)</Text>
+          <Text style={styles.fieldLabel}>
+            {modalType === 'expense' ? 'Expense Name' : 'Income Name (Optional)'}
+          </Text>
           <TextInput
-            placeholder="e.g., Main Job, Gift Money"
+            placeholder={modalType === 'expense' 
+              ? "e.g., Groceries, Gas, Coffee"
+              : "e.g., Main Job, Gift Money"}
             placeholderTextColor="#99A7BC"
             value={name}
             onChangeText={(text) => {
@@ -334,30 +319,66 @@ export default function ModalScreen() {
           />
         </View>
 
-        {incomeType === 'recurring' ? (
+        {modalType === 'expense' ? (
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Category</Text>
+            <View style={styles.categoryGrid}>
+              {EXPENSE_CATEGORIES.map((cat) => {
+                const isActive = category === cat.value;
+                return (
+                  <Pressable
+                    key={cat.value}
+                    style={[
+                      styles.categoryItem,
+                      isActive && styles.categoryItemActive,
+                    ]}
+                    onPress={() => {
+                      setCategory(cat.value);
+                      setErrorMessage('');
+                    }}
+                    disabled={loading}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryLabel,
+                        isActive && styles.categoryLabelActive,
+                      ]}
+                    >
+                      {cat.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : (
           <>
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Frequency</Text>
-              <View style={styles.frequencyGrid}>
-                {FREQUENCY_OPTIONS.map((option) => {
-                  const isActive = frequency === option.value;
+              <Text style={styles.fieldLabel}>Pay Cycle</Text>
+              <View style={styles.payCycleGrid}>
+                {PAY_CYCLE_OPTIONS.map((option) => {
+                  const isActive = payCycle === option.value;
                   return (
                     <Pressable
                       key={option.value}
                       style={[
-                        styles.frequencyOption,
-                        isActive && styles.frequencyOptionActive,
+                        styles.payCycleOption,
+                        isActive && styles.payCycleOptionActive,
                       ]}
                       onPress={() => {
-                        setFrequency(option.value);
+                        setPayCycle(option.value);
+                        // If one-time is selected, disable isMain
+                        if (option.value === 'one-time') {
+                          setIsMain(false);
+                        }
                         setErrorMessage('');
                       }}
                       disabled={loading}
                     >
                       <Text
                         style={[
-                          styles.frequencyText,
-                          isActive && styles.frequencyTextActive,
+                          styles.payCycleText,
+                          isActive && styles.payCycleTextActive,
                         ]}
                       >
                         {option.label}
@@ -369,53 +390,28 @@ export default function ModalScreen() {
             </View>
 
             <View style={styles.field}>
-              <View style={styles.checkboxContainer}>
-                <Pressable
-                  style={styles.checkbox}
-                  onPress={() => {
-                    setIsFirstPayDay(!isFirstPayDay);
-                    if (!isFirstPayDay) {
-                      setLastPayDate(null);
-                    }
-                    setErrorMessage('');
-                  }}
-                  disabled={loading}
-                >
-                  <View
-                    style={[
-                      styles.checkboxBox,
-                      isFirstPayDay && styles.checkboxBoxChecked,
-                    ]}
-                  >
-                    {isFirstPayDay && (
-                      <Text style={styles.checkboxCheckmark}>✓</Text>
-                    )}
-                  </View>
-                  <Text style={styles.checkboxLabel}>
-                    This is the first payday
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-
-            <View style={styles.field}>
               <Text style={styles.fieldLabel}>Next Pay Date</Text>
               {Platform.OS === 'web' ? (
                 <WebDateInput
                   value={nextPayDate}
                   onChange={(date) => {
-                    // Ensure date is not in the past
-                    const today = getToday();
-                    const selectedDate = new Date(date);
-                    selectedDate.setHours(0, 0, 0, 0);
-                    if (selectedDate >= today) {
+                    // Ensure date is not in the past (only for non-one-time)
+                    if (payCycle !== 'one-time') {
+                      const today = getToday();
+                      const selectedDate = new Date(date);
+                      selectedDate.setHours(0, 0, 0, 0);
+                      if (selectedDate >= today) {
+                        setNextPayDate(date);
+                        setErrorMessage('');
+                      } else {
+                        setErrorMessage('Next pay date cannot be in the past');
+                      }
+                    } else {
                       setNextPayDate(date);
                       setErrorMessage('');
-                    } else {
-                      setErrorMessage('Next pay date cannot be in the past');
                     }
                   }}
-                  minimumDate={getToday()}
+                  minimumDate={payCycle !== 'one-time' ? getToday() : undefined}
                   disabled={loading}
                 />
               ) : (
@@ -446,21 +442,26 @@ export default function ModalScreen() {
                         value={nextPayDate}
                         mode="date"
                         display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                        minimumDate={getToday()}
+                        minimumDate={payCycle !== 'one-time' ? getToday() : undefined}
                         onChange={(event, selectedDate) => {
                           if (Platform.OS === 'android') {
                             setShowNextPayDatePicker(false);
                           }
                           if (event.type === 'set' && selectedDate) {
-                            // Ensure date is not in the past
-                            const today = getToday();
-                            const selectedDateOnly = new Date(selectedDate);
-                            selectedDateOnly.setHours(0, 0, 0, 0);
-                            if (selectedDateOnly >= today) {
+                            // Ensure date is not in the past (only for non-one-time)
+                            if (payCycle !== 'one-time') {
+                              const today = getToday();
+                              const selectedDateOnly = new Date(selectedDate);
+                              selectedDateOnly.setHours(0, 0, 0, 0);
+                              if (selectedDateOnly >= today) {
+                                setNextPayDate(selectedDate);
+                                setErrorMessage('');
+                              } else {
+                                setErrorMessage('Next pay date cannot be in the past');
+                              }
+                            } else {
                               setNextPayDate(selectedDate);
                               setErrorMessage('');
-                            } else {
-                              setErrorMessage('Next pay date cannot be in the past');
                             }
                           } else if (Platform.OS === 'android' && event.type === 'dismissed') {
                             setShowNextPayDatePicker(false);
@@ -473,126 +474,37 @@ export default function ModalScreen() {
               )}
             </View>
 
-            {!isFirstPayDay && (
+            {payCycle !== 'one-time' && (
               <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Last Pay Date</Text>
-                {Platform.OS === 'web' ? (
-                  <WebDateInput
-                    value={lastPayDate || new Date()}
-                    onChange={(date) => {
-                      setLastPayDate(date);
+                <View style={styles.switchContainer}>
+                  <View style={styles.switchLabelContainer}>
+                    <Text style={styles.switchLabel}>Set as my main income</Text>
+                    <Text style={styles.switchHint}>
+                      Your main income determines your budgeting cycle
+                    </Text>
+                  </View>
+                  <Switch
+                    value={isMain}
+                    onValueChange={(value) => {
+                      setIsMain(value);
                       setErrorMessage('');
                     }}
-                    maximumDate={nextPayDate}
                     disabled={loading}
+                    trackColor={{ false: '#D3DFF4', true: '#12B76A' }}
+                    thumbColor="#FFFFFF"
                   />
-                ) : (
-                  <>
-                    <Pressable
-                      style={styles.dateButton}
-                      onPress={() => setShowLastPayDatePicker(true)}
-                      disabled={loading}
-                    >
-                      <Text style={styles.dateButtonText}>
-                        {lastPayDate
-                          ? lastPayDate.toLocaleDateString()
-                          : 'Select last pay date'}
-                      </Text>
-                      <Text style={styles.dateButtonIcon}>📅</Text>
-                    </Pressable>
-                    {showLastPayDatePicker && (
-                      <View>
-                        {Platform.OS === 'ios' && (
-                          <View style={styles.datePickerActions}>
-                            <Pressable
-                              style={styles.datePickerButton}
-                              onPress={() => setShowLastPayDatePicker(false)}
-                            >
-                              <Text style={styles.datePickerButtonText}>Done</Text>
-                            </Pressable>
-                          </View>
-                        )}
-                        <DateTimePicker
-                          value={lastPayDate || new Date()}
-                          mode="date"
-                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                          onChange={(event, selectedDate) => {
-                            if (Platform.OS === 'android') {
-                              setShowLastPayDatePicker(false);
-                            }
-                            if (event.type === 'set' && selectedDate) {
-                              setLastPayDate(selectedDate);
-                              setErrorMessage('');
-                            } else if (Platform.OS === 'android' && event.type === 'dismissed') {
-                              setShowLastPayDatePicker(false);
-                            }
-                          }}
-                          maximumDate={nextPayDate}
-                        />
-                      </View>
-                    )}
-                  </>
-                )}
+                </View>
+              </View>
+            )}
+
+            {payCycle === 'one-time' && (
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>
+                  ℹ️ One-time income cannot be set as main income
+                </Text>
               </View>
             )}
           </>
-        ) : (
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Income Date</Text>
-            {Platform.OS === 'web' ? (
-              <WebDateInput
-                value={oneTimeDate}
-                onChange={(date) => {
-                  setOneTimeDate(date);
-                  setErrorMessage('');
-                }}
-                disabled={loading}
-              />
-            ) : (
-              <>
-                <Pressable
-                  style={styles.dateButton}
-                  onPress={() => setShowOneTimeDatePicker(true)}
-                  disabled={loading}
-                >
-                  <Text style={styles.dateButtonText}>
-                    {oneTimeDate.toLocaleDateString()}
-                  </Text>
-                  <Text style={styles.dateButtonIcon}>📅</Text>
-                </Pressable>
-                {showOneTimeDatePicker && (
-                  <View>
-                    {Platform.OS === 'ios' && (
-                      <View style={styles.datePickerActions}>
-                        <Pressable
-                          style={styles.datePickerButton}
-                          onPress={() => setShowOneTimeDatePicker(false)}
-                        >
-                          <Text style={styles.datePickerButtonText}>Done</Text>
-                        </Pressable>
-                      </View>
-                    )}
-                    <DateTimePicker
-                      value={oneTimeDate}
-                      mode="date"
-                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                      onChange={(event, selectedDate) => {
-                        if (Platform.OS === 'android') {
-                          setShowOneTimeDatePicker(false);
-                        }
-                        if (event.type === 'set' && selectedDate) {
-                          setOneTimeDate(selectedDate);
-                          setErrorMessage('');
-                        } else if (Platform.OS === 'android' && event.type === 'dismissed') {
-                          setShowOneTimeDatePicker(false);
-                        }
-                      }}
-                    />
-                  </View>
-                )}
-              </>
-            )}
-          </View>
         )}
 
         <Pressable
@@ -604,7 +516,7 @@ export default function ModalScreen() {
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <Text style={styles.submitText}>
-              Add Income ({incomeType === 'one-time' ? 'One-Time' : 'Recurring'})
+              {modalType === 'expense' ? 'Add Expense' : 'Add Income'}
             </Text>
           )}
         </Pressable>
@@ -829,12 +741,12 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
   },
-  frequencyGrid: {
+  payCycleGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
   },
-  frequencyOption: {
+  payCycleOption: {
     flex: 1,
     minWidth: '45%',
     paddingVertical: 12,
@@ -846,51 +758,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  frequencyOptionActive: {
+  payCycleOptionActive: {
     borderColor: '#22B15C',
     backgroundColor: '#ECFDF5',
   },
-  frequencyText: {
+  payCycleText: {
     fontSize: 14,
     fontWeight: '500',
     color: '#6E7A90',
   },
-  frequencyTextActive: {
+  payCycleTextActive: {
     color: '#22B15C',
     fontWeight: '600',
   },
-  checkboxContainer: {
-    marginTop: 8,
-  },
-  checkbox: {
+  switchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-  },
-  checkboxBox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#D3DFF4',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#D3DFF4',
   },
-  checkboxBoxChecked: {
-    borderColor: '#22B15C',
-    backgroundColor: '#22B15C',
-  },
-  checkboxCheckmark: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  checkboxLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1C2533',
+  switchLabelContainer: {
     flex: 1,
+    gap: 4,
+  },
+  switchLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1C2533',
+  },
+  switchHint: {
+    fontSize: 12,
+    color: '#6E7A90',
+  },
+  infoBox: {
+    backgroundColor: '#E8F1FF',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#D3DFF4',
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#6E7A90',
+    textAlign: 'center',
   },
   dateButton: {
     flexDirection: 'row',

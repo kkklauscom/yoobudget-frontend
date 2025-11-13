@@ -1,10 +1,10 @@
 import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/contexts/AuthContext";
 import * as IncomeService from "@/services/income";
-import type { Income } from "@/services/income";
+import type { Income, ViewCycleResponse } from "@/services/income";
 
 type Allocation = {
   name: string;
@@ -36,7 +36,9 @@ export default function HomeScreen() {
   const [fixedExpenses, setFixedExpenses] = useState<Expense[]>([]);
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cycleLoading, setCycleLoading] = useState(true);
   const [totalFixedExpenses, setTotalFixedExpenses] = useState<number>(0);
+  const [viewCycle, setViewCycle] = useState<ViewCycleResponse | null>(null);
   
   // Format current date
   const currentDate = useMemo(() => {
@@ -49,76 +51,88 @@ export default function HomeScreen() {
     });
   }, []);
 
-  // Calculate monthly income from all incomes
-  const monthlyIncome = useMemo(() => {
-    let total = 0;
-    const currentDate = new Date();
-    
-    incomes.forEach((income) => {
-      if (income.type === 'one-time') {
-        // One-time income: check if it's in the current month
-        const incomeDate = new Date(income.oneTimeDate);
-        if (
-          incomeDate.getMonth() === currentDate.getMonth() &&
-          incomeDate.getFullYear() === currentDate.getFullYear()
-        ) {
-          total += income.amount;
-        }
-      } else if (income.type === 'recurring') {
-        // Recurring income: calculate monthly amount based on frequency
-        const frequency = income.frequency;
-        let monthlyAmount = income.amount;
-        
-        switch (frequency) {
-          case 'weekly':
-            monthlyAmount = income.amount * 4.33; // Average weeks per month
-            break;
-          case 'fortnightly':
-            monthlyAmount = income.amount * 2.17; // Average fortnights per month
-            break;
-          case 'monthly':
-            monthlyAmount = income.amount;
-            break;
-          case 'yearly':
-            monthlyAmount = income.amount / 12;
-            break;
-        }
-        
-        total += monthlyAmount;
-      }
-    });
-    
-    return Math.round(total);
-  }, [incomes]);
+  // Get pay cycle label
+  const getPayCycleLabel = (payCycle: string): string => {
+    switch (payCycle) {
+      case 'weekly':
+        return 'weekly';
+      case 'biweekly':
+        return 'biweekly';
+      case 'monthly':
+        return 'monthly';
+      case 'one-time':
+        return 'one-time';
+      default:
+        return 'monthly';
+    }
+  };
 
-  // Fetch incomes from API
+  // Format date range for display
+  const formatDateRange = (start: string, end: string): string => {
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const startStr = startDate.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+    const endStr = endDate.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+    return `${startStr} → ${endStr}`;
+  };
+
   const fetchIncomes = useCallback(async () => {
     try {
       setLoading(true);
       const data = await IncomeService.getAllIncomes();
-      setIncomes(data);
+      setIncomes(Array.isArray(data) ? [...data] : []);
     } catch (error) {
       console.error('Failed to fetch incomes:', error);
+      setIncomes([]);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Fetch incomes when screen is focused
+  const fetchViewCycle = useCallback(async () => {
+    try {
+      setCycleLoading(true);
+      const cycleData = await IncomeService.getViewCycle();
+      setViewCycle(cycleData);
+    } catch (error: any) {
+      console.error('Failed to fetch view cycle:', error);
+      // If error is "NO_MAIN_INCOME", set viewCycle to null to show empty state
+      if (error?.message?.includes('main income') || error?.message?.includes('NO_MAIN_INCOME')) {
+        setViewCycle(null);
+      } else {
+        setViewCycle(null);
+      }
+    } finally {
+      setCycleLoading(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       fetchIncomes();
-    }, [fetchIncomes])
+      fetchViewCycle();
+    }, [fetchIncomes, fetchViewCycle])
   );
   
   const summary = useMemo(
     () => ({
-      income: monthlyIncome,
+      income: viewCycle?.totalIncome ?? 0,
       fixedExpenses: totalFixedExpenses,
       date: currentDate,
       currentSavings: user?.currentSavings ?? 0,
+      payCycle: viewCycle?.payCycle || 'monthly',
+      cycleStart: viewCycle?.cycleStart,
+      cycleEnd: viewCycle?.cycleEnd,
+      remainingDays: viewCycle?.remainingDays ?? 0,
+      hasMainIncome: viewCycle !== null && !viewCycle.error,
     }),
-    [monthlyIncome, totalFixedExpenses, currentDate, user?.currentSavings]
+    [viewCycle, totalFixedExpenses, currentDate, user?.currentSavings]
   );
 
   // Generate allocations from user budget ratio if available
@@ -128,12 +142,12 @@ export default function HomeScreen() {
     }
     
     // If no allocations from API, create from user budget ratio
-    if (user?.budgetRatio && monthlyIncome > 0) {
+    if (user?.budgetRatio && summary.income > 0) {
       return [
         {
           name: "Needs",
           percentage: user.budgetRatio.needs,
-          budget: Math.round((monthlyIncome * user.budgetRatio.needs) / 100),
+          budget: Math.round((summary.income * user.budgetRatio.needs) / 100),
           spent: 0, // Will come from API
           color: ALLOCATION_COLORS.needs.color,
           accent: ALLOCATION_COLORS.needs.accent,
@@ -141,7 +155,7 @@ export default function HomeScreen() {
         {
           name: "Wants",
           percentage: user.budgetRatio.wants,
-          budget: Math.round((monthlyIncome * user.budgetRatio.wants) / 100),
+          budget: Math.round((summary.income * user.budgetRatio.wants) / 100),
           spent: 0, // Will come from API
           color: ALLOCATION_COLORS.wants.color,
           accent: ALLOCATION_COLORS.wants.accent,
@@ -149,7 +163,7 @@ export default function HomeScreen() {
         {
           name: "Savings",
           percentage: user.budgetRatio.savings,
-          budget: Math.round((monthlyIncome * user.budgetRatio.savings) / 100),
+          budget: Math.round((summary.income * user.budgetRatio.savings) / 100),
           spent: 0, // Will come from API
           color: ALLOCATION_COLORS.savings.color,
           accent: ALLOCATION_COLORS.savings.accent,
@@ -158,7 +172,7 @@ export default function HomeScreen() {
     }
     
     return [];
-  }, [allocations, user?.budgetRatio, monthlyIncome]);
+  }, [allocations, user?.budgetRatio, summary.income]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -178,14 +192,129 @@ export default function HomeScreen() {
           </Link>
         </View>
 
-        <View style={styles.incomeCard}>
-          <Text style={styles.cardLabel}>Total monthly income</Text>
-          <Text style={styles.incomeValue}>
-            ${summary.income.toLocaleString()}
-          </Text>
-          <Text style={styles.cardSubLabel}>
-            Fixed expenses: ${summary.fixedExpenses.toLocaleString()}
-          </Text>
+        {/* Cycle Information Card */}
+        {cycleLoading ? (
+          <View style={styles.cycleCard}>
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <Text style={styles.cycleLoadingText}>Loading cycle information...</Text>
+          </View>
+        ) : summary.hasMainIncome ? (
+          <View style={styles.cycleCard}>
+            <View style={styles.cycleHeader}>
+              <Text style={styles.cycleTitle}>Current Cycle</Text>
+              <Text style={styles.cycleType}>
+                {getPayCycleLabel(summary.payCycle)}
+              </Text>
+            </View>
+            {summary.cycleStart && summary.cycleEnd && (
+              <Text style={styles.cycleDateRange}>
+                {formatDateRange(summary.cycleStart, summary.cycleEnd)}
+              </Text>
+            )}
+            <View style={styles.cycleFooter}>
+              <Text style={styles.cycleIncome}>
+                ${summary.income.toLocaleString()}
+              </Text>
+              <Text style={styles.cycleRemainingDays}>
+                {summary.remainingDays} days remaining
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.emptyCycleCard}>
+            <Text style={styles.emptyCycleTitle}>
+              No Main Income Set
+            </Text>
+            <Text style={styles.emptyCycleText}>
+              Please add an income and mark it as your main income to begin tracking your budget cycle.
+            </Text>
+          </View>
+        )}
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Incomes</Text>
+            <Link href="/modal" asChild>
+              <Pressable style={styles.sectionAction}>
+                <Text style={styles.sectionActionText}>+</Text>
+              </Pressable>
+            </Link>
+          </View>
+          <View style={styles.sectionCard}>
+            {loading ? (
+              <View style={styles.emptyState}>
+                <ActivityIndicator size="small" color="#12B76A" />
+                <Text style={styles.emptyStateText}>Loading incomes...</Text>
+              </View>
+            ) : incomes.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>
+                  No incomes yet
+                </Text>
+                <Text style={styles.emptyStateSubtext}>
+                  Add your first income to get started
+                </Text>
+              </View>
+            ) : (
+              incomes.map((income, index) => {
+                const incomeName = income.name || 'Unnamed Income';
+                const payCycleLabel = getPayCycleLabel(income.payCycle);
+                const incomeDate = new Date(income.nextPayDate);
+                const incomeDetails = income.payCycle === 'one-time' 
+                  ? `One-time • ${incomeDate.toLocaleDateString()}`
+                  : `${payCycleLabel.charAt(0).toUpperCase() + payCycleLabel.slice(1)} • Next: ${incomeDate.toLocaleDateString()}`;
+                
+                return (
+                  <View 
+                    key={income._id} 
+                    style={[
+                      styles.incomeRow,
+                      index === incomes.length - 1 && styles.incomeRowLast
+                    ]}
+                  >
+                    <View style={styles.incomeInfo}>
+                      <View style={styles.incomeIcon}>
+                        <Text style={styles.incomeIconText}>💰</Text>
+                      </View>
+                      <View style={styles.incomeDetails}>
+                        <View style={styles.incomeTitleRow}>
+                          <Text style={styles.incomeTitle}>{incomeName}</Text>
+                          {income.isMain && (
+                            <View style={styles.mainBadge}>
+                              <Text style={styles.mainBadgeText}>MAIN INCOME</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.incomeSubtitle}>{incomeDetails}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.incomeRight}>
+                      <Text style={styles.incomeAmount}>
+                        ${income.amount.toLocaleString()}
+                      </Text>
+                      {!income.isMain && income.payCycle !== 'one-time' && (
+                        <Pressable
+                          style={styles.setMainButton}
+                          onPress={async () => {
+                            try {
+                              await IncomeService.setMainIncome(income._id);
+                              // Refresh incomes and cycle
+                              await fetchIncomes();
+                              await fetchViewCycle();
+                            } catch (error) {
+                              console.error('Failed to set main income:', error);
+                            }
+                          }}
+                        >
+                          <Text style={styles.setMainButtonText}>Set as main</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -367,6 +496,88 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "700",
   },
+  cycleCard: {
+    borderRadius: 24,
+    padding: 24,
+    gap: 16,
+    backgroundColor: "#3383FF",
+    shadowColor: "#3383FF",
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  cycleHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  cycleTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  cycleType: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#E6F0FF",
+    textTransform: "capitalize",
+  },
+  cycleDateRange: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    textAlign: "center",
+  },
+  cycleFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  cycleIncome: {
+    fontSize: 32,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  cycleRemainingDays: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#E6F0FF",
+  },
+  cycleLoadingText: {
+    fontSize: 14,
+    color: "#E6F0FF",
+    textAlign: "center",
+    marginTop: 8,
+  },
+  emptyCycleCard: {
+    borderRadius: 24,
+    padding: 24,
+    gap: 12,
+    backgroundColor: "#FFF4E6",
+    borderWidth: 2,
+    borderColor: "#FFD89C",
+    shadowColor: "#FFD89C",
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  emptyCycleTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#B8860B",
+    textAlign: "center",
+  },
+  emptyCycleText: {
+    fontSize: 14,
+    color: "#8B6914",
+    textAlign: "center",
+    lineHeight: 20,
+  },
   incomeCard: {
     borderRadius: 24,
     padding: 24,
@@ -510,13 +721,86 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#1B1B33",
   },
-  moreButton: {
-    marginTop: 4,
+  incomeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F4F8",
   },
-  moreButtonText: {
-    fontSize: 14,
-    color: "#3383FF",
+  incomeRowLast: {
+    borderBottomWidth: 0,
+  },
+  incomeInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  incomeIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#E8F5E9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  incomeIconText: {
+    fontSize: 20,
+  },
+  incomeDetails: {
+    flex: 1,
+    gap: 4,
+  },
+  incomeTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  incomeTitle: {
+    fontSize: 16,
     fontWeight: "600",
+    color: "#1B1B33",
+  },
+  mainBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: "#12B76A",
+  },
+  mainBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    letterSpacing: 0.5,
+  },
+  incomeSubtitle: {
+    fontSize: 12,
+    color: "#6F7C8E",
+  },
+  incomeAmount: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#12B76A",
+  },
+  incomeRight: {
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  setMainButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: "#E8F1FF",
+    borderWidth: 1,
+    borderColor: "#3383FF",
+  },
+  setMainButtonText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#3383FF",
   },
   disposableCard: {
     borderRadius: 24,

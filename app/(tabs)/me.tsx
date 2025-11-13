@@ -90,27 +90,6 @@ export default function MeScreen() {
           )}
         </View>
 
-        <View style={[styles.card, styles.softCard]}>
-          <View style={styles.cardHeader}>
-            <View style={styles.iconCircle}>
-              <Text style={styles.iconText}>💵</Text>
-            </View>
-            <View>
-              <Text style={styles.cardTitle}>View Cycle</Text>
-              <Text style={styles.cardSubtitle}>
-                How you view your budget
-              </Text>
-            </View>
-          </View>
-          <View style={styles.dropdown}>
-            <Text style={styles.dropdownValue}>
-              {user?.viewCycle
-                ? user.viewCycle.charAt(0).toUpperCase() + user.viewCycle.slice(1)
-                : 'Monthly'}
-            </Text>
-            <Text style={styles.dropdownCaret}>⌄</Text>
-          </View>
-        </View>
 
         <View style={styles.card}>
           <View style={styles.cardHeader}>
@@ -325,21 +304,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 3,
   },
-  softCard: {
-    backgroundColor: '#F3FBF6',
-  },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
-  },
-  iconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#CCF5DE',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   iconCircleAlt: {
     width: 48,
@@ -367,26 +335,6 @@ const styles = StyleSheet.create({
   },
   cardSubtitle: {
     fontSize: 14,
-    color: '#6E7A90',
-  },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderWidth: 1,
-    borderColor: '#D2E2FF',
-  },
-  dropdownValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1B2433',
-  },
-  dropdownCaret: {
-    fontSize: 18,
     color: '#6E7A90',
   },
   ratioList: {
