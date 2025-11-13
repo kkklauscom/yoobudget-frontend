@@ -1,7 +1,10 @@
-import { Link } from "expo-router";
-import { useMemo } from "react";
+import { Link, useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "@/contexts/AuthContext";
+import * as IncomeService from "@/services/income";
+import type { Income } from "@/services/income";
 
 type Allocation = {
   name: string;
@@ -18,49 +21,144 @@ type Expense = {
   type: "Need" | "Want";
 };
 
-const allocations: Allocation[] = [
-  {
-    name: "Needs",
-    percentage: 50,
-    budget: 2500,
-    spent: 1410,
-    color: "#E9F8EF",
-    accent: "#21C17A",
-  },
-  {
-    name: "Wants",
-    percentage: 30,
-    budget: 1500,
-    spent: 90,
-    color: "#E6F0FF",
-    accent: "#3383FF",
-  },
-  {
-    name: "Savings",
-    percentage: 20,
-    budget: 1000,
-    spent: 0,
-    color: "#F1E7FF",
-    accent: "#9B51E0",
-  },
-];
-
-const fixedExpenses: Expense[] = [
-  { title: "Rent", amount: 1200, type: "Need" },
-  { title: "Phone Bill", amount: 60, type: "Need" },
-  { title: "Transport", amount: 150, type: "Need" },
-];
+// Color constants for allocations
+const ALLOCATION_COLORS = {
+  needs: { color: "#E9F8EF", accent: "#21C17A" },
+  wants: { color: "#E6F0FF", accent: "#3383FF" },
+  savings: { color: "#F1E7FF", accent: "#9B51E0" },
+};
 
 export default function HomeScreen() {
+  const { user } = useAuth();
+  
+  // State for data that will come from API
+  const [allocations, setAllocations] = useState<Allocation[]>([]);
+  const [fixedExpenses, setFixedExpenses] = useState<Expense[]>([]);
+  const [incomes, setIncomes] = useState<Income[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [totalFixedExpenses, setTotalFixedExpenses] = useState<number>(0);
+  
+  // Format current date
+  const currentDate = useMemo(() => {
+    const date = new Date();
+    return date.toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  }, []);
+
+  // Calculate monthly income from all incomes
+  const monthlyIncome = useMemo(() => {
+    let total = 0;
+    const currentDate = new Date();
+    
+    incomes.forEach((income) => {
+      if (income.type === 'one-time') {
+        // One-time income: check if it's in the current month
+        const incomeDate = new Date(income.oneTimeDate);
+        if (
+          incomeDate.getMonth() === currentDate.getMonth() &&
+          incomeDate.getFullYear() === currentDate.getFullYear()
+        ) {
+          total += income.amount;
+        }
+      } else if (income.type === 'recurring') {
+        // Recurring income: calculate monthly amount based on frequency
+        const frequency = income.frequency;
+        let monthlyAmount = income.amount;
+        
+        switch (frequency) {
+          case 'weekly':
+            monthlyAmount = income.amount * 4.33; // Average weeks per month
+            break;
+          case 'fortnightly':
+            monthlyAmount = income.amount * 2.17; // Average fortnights per month
+            break;
+          case 'monthly':
+            monthlyAmount = income.amount;
+            break;
+          case 'yearly':
+            monthlyAmount = income.amount / 12;
+            break;
+        }
+        
+        total += monthlyAmount;
+      }
+    });
+    
+    return Math.round(total);
+  }, [incomes]);
+
+  // Fetch incomes from API
+  const fetchIncomes = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await IncomeService.getAllIncomes();
+      setIncomes(data);
+    } catch (error) {
+      console.error('Failed to fetch incomes:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Fetch incomes when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      fetchIncomes();
+    }, [fetchIncomes])
+  );
+  
   const summary = useMemo(
     () => ({
-      income: 5000,
-      fixedExpenses: 1500,
-      date: "Wednesday, November 12, 2025",
-      disposable: 3500,
+      income: monthlyIncome,
+      fixedExpenses: totalFixedExpenses,
+      date: currentDate,
+      currentSavings: user?.currentSavings ?? 0,
     }),
-    []
+    [monthlyIncome, totalFixedExpenses, currentDate, user?.currentSavings]
   );
+
+  // Generate allocations from user budget ratio if available
+  const displayAllocations = useMemo(() => {
+    if (allocations.length > 0) {
+      return allocations;
+    }
+    
+    // If no allocations from API, create from user budget ratio
+    if (user?.budgetRatio && monthlyIncome > 0) {
+      return [
+        {
+          name: "Needs",
+          percentage: user.budgetRatio.needs,
+          budget: Math.round((monthlyIncome * user.budgetRatio.needs) / 100),
+          spent: 0, // Will come from API
+          color: ALLOCATION_COLORS.needs.color,
+          accent: ALLOCATION_COLORS.needs.accent,
+        },
+        {
+          name: "Wants",
+          percentage: user.budgetRatio.wants,
+          budget: Math.round((monthlyIncome * user.budgetRatio.wants) / 100),
+          spent: 0, // Will come from API
+          color: ALLOCATION_COLORS.wants.color,
+          accent: ALLOCATION_COLORS.wants.accent,
+        },
+        {
+          name: "Savings",
+          percentage: user.budgetRatio.savings,
+          budget: Math.round((monthlyIncome * user.budgetRatio.savings) / 100),
+          spent: 0, // Will come from API
+          color: ALLOCATION_COLORS.savings.color,
+          accent: ALLOCATION_COLORS.savings.accent,
+        },
+      ];
+    }
+    
+    return [];
+  }, [allocations, user?.budgetRatio, monthlyIncome]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -70,7 +168,7 @@ export default function HomeScreen() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>Budget Manager</Text>
+            <Text style={styles.headerTitle}>YooBudget</Text>
             <Text style={styles.headerDate}>{summary.date}</Text>
           </View>
           <Link href="/modal" asChild>
@@ -99,7 +197,17 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.sectionCard}>
-            {allocations.map((allocation) => {
+            {displayAllocations.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>
+                  No budget allocation data available
+                </Text>
+                <Text style={styles.emptyStateSubtext}>
+                  Set your income to see budget allocations
+                </Text>
+              </View>
+            ) : (
+              displayAllocations.map((allocation) => {
               const savings = allocation.budget - allocation.spent;
               const progress =
                 allocation.budget === 0
@@ -156,7 +264,8 @@ export default function HomeScreen() {
                   </View>
                 </View>
               );
-            })}
+            })
+            )}
           </View>
         </View>
 
@@ -170,7 +279,17 @@ export default function HomeScreen() {
             </Link>
           </View>
           <View style={styles.sectionCard}>
-            {fixedExpenses.map((expense) => (
+            {fixedExpenses.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>
+                  No fixed expenses yet
+                </Text>
+                <Text style={styles.emptyStateSubtext}>
+                  Add your first fixed expense to get started
+                </Text>
+              </View>
+            ) : (
+              fixedExpenses.map((expense) => (
               <View key={expense.title} style={styles.expenseRow}>
                 <View style={styles.expenseInfo}>
                   <View style={styles.expenseIcon}>
@@ -185,19 +304,20 @@ export default function HomeScreen() {
                   ${expense.amount.toLocaleString()}
                 </Text>
               </View>
-            ))}
-            <Pressable style={styles.moreButton}>
-              <Text style={styles.moreButtonText}>+2 more expenses</Text>
-            </Pressable>
+            ))
+            )}
           </View>
         </View>
 
         <View style={styles.disposableCard}>
-          <Text style={styles.cardLabel}>Disposable Income</Text>
+          <Text style={styles.cardLabel}>Current Savings</Text>
           <Text style={styles.disposableValue}>
-            ${summary.disposable.toLocaleString()}
+            ${summary.currentSavings.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
           </Text>
-          <Text style={styles.cardSubLabel}>Available for the month</Text>
+          <Text style={styles.cardSubLabel}>Your current savings balance</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -413,5 +533,20 @@ const styles = StyleSheet.create({
     fontSize: 36,
     fontWeight: "800",
     color: "#FFFFFF",
+  },
+  emptyState: {
+    padding: 24,
+    alignItems: "center",
+    gap: 8,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#1B1B33",
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: "#6F7C8E",
+    textAlign: "center",
   },
 });

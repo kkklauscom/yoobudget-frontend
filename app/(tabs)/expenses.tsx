@@ -1,4 +1,5 @@
 import { Link } from 'expo-router';
+import { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Pressable,
@@ -8,12 +9,17 @@ import {
   View,
 } from 'react-native';
 
-const summary = {
-  totalSpent: 0,
-  totalCount: 0,
-};
-
 export default function ExpensesScreen() {
+  // State for data that will come from API
+  const [totalSpent, setTotalSpent] = useState<number>(0);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [expenses, setExpenses] = useState<any[]>([]);
+
+  const summary = {
+    totalSpent,
+    totalCount,
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView

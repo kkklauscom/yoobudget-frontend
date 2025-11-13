@@ -31,7 +31,7 @@ export default function TabLayout() {
         options={{
           title: "Expenses",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="list.bullet.rectangle" color={color} />
+            <IconSymbol size={28} name="creditcard.fill" color={color} />
           ),
         }}
       />
@@ -40,7 +40,7 @@ export default function TabLayout() {
         options={{
           title: "Me",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="person.crop.circle" color={color} />
+            <IconSymbol size={28} name="person.fill" color={color} />
           ),
         }}
       />

@@ -1,11 +1,17 @@
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '@/contexts/AuthContext';
 
 const ratios = [
   { label: 'Needs', value: 50, color: '#25C46A' },
@@ -14,6 +20,60 @@ const ratios = [
 ];
 
 export default function MeScreen() {
+  const { user, logout } = useAuth();
+  const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    console.log('handleLogout called'); // Debug log
+    
+    // For Web platform, use window.confirm, for native use Alert.alert
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Are you sure you want to logout?');
+      console.log('Confirm result:', confirmed); // Debug log
+      if (confirmed) {
+        console.log('User confirmed logout'); // Debug log
+        setLoggingOut(true);
+        try {
+          await logout();
+          console.log('Logout successful, redirecting...'); // Debug log
+          router.replace('/login');
+        } catch (logoutErr) {
+          console.error('Logout error:', logoutErr); // Debug log
+          window.alert('Logout failed: ' + (logoutErr instanceof Error ? logoutErr.message : 'Unknown error'));
+        } finally {
+          setLoggingOut(false);
+        }
+      }
+    } else {
+      Alert.alert(
+        'Logout',
+        'Are you sure you want to logout?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Logout',
+            style: 'destructive',
+            onPress: async () => {
+              setLoggingOut(true);
+              try {
+                await logout();
+                router.replace('/login');
+              } catch (logoutErr) {
+                Alert.alert('Error', 'Logout failed');
+              } finally {
+                setLoggingOut(false);
+              }
+            },
+          },
+        ]
+      );
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
@@ -23,8 +83,11 @@ export default function MeScreen() {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Settings</Text>
           <Text style={styles.headerSubtitle}>
-            Customize your budget preferences
+            {user?.name || user?.email || 'Customize your budget preferences'}
           </Text>
+          {user?.email && (
+            <Text style={styles.headerEmail}>{user.email}</Text>
+          )}
         </View>
 
         <View style={[styles.card, styles.softCard]}>
@@ -33,16 +96,20 @@ export default function MeScreen() {
               <Text style={styles.iconText}>💵</Text>
             </View>
             <View>
-              <Text style={styles.cardTitle}>Income Frequency</Text>
+              <Text style={styles.cardTitle}>View Cycle</Text>
               <Text style={styles.cardSubtitle}>
-                How often you receive income
+                How you view your budget
               </Text>
             </View>
           </View>
-          <Pressable style={styles.dropdown}>
-            <Text style={styles.dropdownValue}>Monthly</Text>
+          <View style={styles.dropdown}>
+            <Text style={styles.dropdownValue}>
+              {user?.viewCycle
+                ? user.viewCycle.charAt(0).toUpperCase() + user.viewCycle.slice(1)
+                : 'Monthly'}
+            </Text>
             <Text style={styles.dropdownCaret}>⌄</Text>
-          </Pressable>
+          </View>
         </View>
 
         <View style={styles.card}>
@@ -53,30 +120,88 @@ export default function MeScreen() {
             <View>
               <Text style={styles.cardTitle}>Budget Ratios</Text>
               <Text style={styles.cardSubtitle}>
-                Current: 50% / 30% / 20%
+                {user?.budgetRatio
+                  ? `Current: ${user.budgetRatio.needs}% / ${user.budgetRatio.wants}% / ${user.budgetRatio.savings}%`
+                  : 'Current: 50% / 30% / 20%'}
               </Text>
             </View>
           </View>
           <View style={styles.ratioList}>
-            {ratios.map((ratio) => (
-              <View key={ratio.label} style={styles.ratioRow}>
-                <Text style={styles.ratioLabel}>{ratio.label}</Text>
-                <View style={styles.ratioTrack}>
-                  <View
-                    style={[
-                      styles.ratioFill,
-                      {
-                        width: `${ratio.value}%`,
-                        backgroundColor: ratio.color,
-                      },
-                    ]}
-                  />
+            {user?.budgetRatio ? (
+              <>
+                <View style={styles.ratioRow}>
+                  <Text style={styles.ratioLabel}>Needs</Text>
+                  <View style={styles.ratioTrack}>
+                    <View
+                      style={[
+                        styles.ratioFill,
+                        {
+                          width: `${user.budgetRatio.needs}%`,
+                          backgroundColor: '#25C46A',
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.ratioValue, { color: '#25C46A' }]}>
+                    {user.budgetRatio.needs}%
+                  </Text>
                 </View>
-                <Text style={[styles.ratioValue, { color: ratio.color }]}>
-                  {ratio.value}%
-                </Text>
-              </View>
-            ))}
+                <View style={styles.ratioRow}>
+                  <Text style={styles.ratioLabel}>Wants</Text>
+                  <View style={styles.ratioTrack}>
+                    <View
+                      style={[
+                        styles.ratioFill,
+                        {
+                          width: `${user.budgetRatio.wants}%`,
+                          backgroundColor: '#3383FF',
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.ratioValue, { color: '#3383FF' }]}>
+                    {user.budgetRatio.wants}%
+                  </Text>
+                </View>
+                <View style={styles.ratioRow}>
+                  <Text style={styles.ratioLabel}>Savings</Text>
+                  <View style={styles.ratioTrack}>
+                    <View
+                      style={[
+                        styles.ratioFill,
+                        {
+                          width: `${user.budgetRatio.savings}%`,
+                          backgroundColor: '#9B51E0',
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.ratioValue, { color: '#9B51E0' }]}>
+                    {user.budgetRatio.savings}%
+                  </Text>
+                </View>
+              </>
+            ) : (
+              ratios.map((ratio) => (
+                <View key={ratio.label} style={styles.ratioRow}>
+                  <Text style={styles.ratioLabel}>{ratio.label}</Text>
+                  <View style={styles.ratioTrack}>
+                    <View
+                      style={[
+                        styles.ratioFill,
+                        {
+                          width: `${ratio.value}%`,
+                          backgroundColor: ratio.color,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.ratioValue, { color: ratio.color }]}>
+                    {ratio.value}%
+                  </Text>
+                </View>
+              ))
+            )}
           </View>
           <Text style={styles.helperText}>
             Edit ratios from the Dashboard page
@@ -122,6 +247,41 @@ export default function MeScreen() {
             <Text style={styles.resetButtonText}>Reset Budget</Text>
           </Pressable>
         </View>
+
+        <View style={[styles.card, styles.logoutCard]}>
+          <View style={styles.cardHeader}>
+            <View style={styles.iconCircleLogout}>
+              <Text style={styles.iconText}>🚪</Text>
+            </View>
+            <View style={styles.cardHeaderText}>
+              <Text style={styles.logoutTitle}>Logout</Text>
+              <Text style={styles.cardSubtitle}>
+                Sign out of your account
+              </Text>
+            </View>
+          </View>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.logoutButton,
+              loggingOut && styles.logoutButtonDisabled,
+              pressed && styles.logoutButtonPressed,
+            ]}
+            onPress={(e) => {
+              e.stopPropagation();
+              console.log('Logout button clicked'); // Debug log
+              handleLogout();
+            }}
+            disabled={loggingOut}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            {loggingOut ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.logoutButtonText}>Logout</Text>
+            )}
+          </Pressable>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -148,6 +308,11 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 14,
     color: '#6E7A90',
+  },
+  headerEmail: {
+    fontSize: 12,
+    color: '#9CA3B0',
+    marginTop: 4,
   },
   card: {
     borderRadius: 24,
@@ -305,6 +470,51 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  logoutCard: {
+    borderWidth: 1,
+    borderColor: '#E0E6F4',
+  },
+  iconCircleLogout: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F0F4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoutTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1B2433',
+  },
+  logoutButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#6E7A90',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 16,
+    minWidth: 100,
+    minHeight: 44, // Ensure minimum touch target size
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer', // Web cursor
+    zIndex: 10, // Ensure button is above other elements
+  },
+  logoutButtonDisabled: {
+    opacity: 0.6,
+  },
+  logoutButtonPressed: {
+    opacity: 0.8,
+    backgroundColor: '#5A6678',
+  },
+  logoutButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  cardHeaderText: {
+    flex: 1,
   },
 });
 
