@@ -134,16 +134,39 @@ const PAY_CYCLE_OPTIONS: { label: string; value: PayCycle }[] = [
   { label: 'One-Time', value: 'one-time' },
 ];
 
-// Expense categories
+// Expense categories (matching backend schema - must match API response)
+// Note: Category names should match backend (capitalized first letter)
 const EXPENSE_CATEGORIES = [
-  { label: 'Food', value: 'food' },
-  { label: 'Transport', value: 'transport' },
-  { label: 'Shopping', value: 'shopping' },
-  { label: 'Bills', value: 'bills' },
-  { label: 'Entertainment', value: 'entertainment' },
-  { label: 'Health', value: 'health' },
-  { label: 'Education', value: 'education' },
-  { label: 'Other', value: 'other' },
+  { label: 'Food', value: 'Food', icon: '🍔' },
+  { label: 'Transport', value: 'Transport', icon: '🚗' },
+  { label: 'Housing', value: 'Housing', icon: '🏠' },
+  { label: 'Utilities', value: 'Utilities', icon: '💡' },
+  { label: 'Entertainment', value: 'Entertainment', icon: '🎬' },
+  { label: 'Shopping', value: 'Shopping', icon: '🛍️' },
+  { label: 'Healthcare', value: 'Healthcare', icon: '🏥' },
+  { label: 'Education', value: 'Education', icon: '📚' },
+  { label: 'Gifts', value: 'Gifts', icon: '🎁' },
+  { label: 'Travel', value: 'Travel', icon: '✈️' },
+];
+
+// Expense type options
+const EXPENSE_TYPE_OPTIONS = [
+  { label: 'One-Time', value: 'one-time' },
+  { label: 'Recurring', value: 'recurring' },
+];
+
+// Pay From options
+const PAY_FROM_OPTIONS = [
+  { label: 'Needs', value: 'needs', color: '#21C17A' },
+  { label: 'Wants', value: 'wants', color: '#3383FF' },
+  { label: 'Savings', value: 'savings', color: '#9B51E0' },
+];
+
+// Expense pay cycle options (for recurring expenses)
+const EXPENSE_PAY_CYCLE_OPTIONS: { label: string; value: SpendingService.ExpensePayCycle }[] = [
+  { label: 'Weekly', value: 'weekly' },
+  { label: 'Biweekly', value: 'biweekly' },
+  { label: 'Monthly', value: 'monthly' },
 ];
 
 export default function ModalScreen() {
@@ -174,7 +197,15 @@ export default function ModalScreen() {
   const [showNextPayDatePicker, setShowNextPayDatePicker] = useState(false);
   
   // Expense-specific states
-  const [category, setCategory] = useState<string>('food');
+  const [expenseType, setExpenseType] = useState<SpendingService.ExpenseType>('one-time');
+  const [spendFrom, setSpendFrom] = useState<SpendingService.SpendFrom>('needs');
+  const [category, setCategory] = useState<string>('Food'); // Default to first category
+  const [note, setNote] = useState<string>('');
+  const [expensePayCycle, setExpensePayCycle] = useState<SpendingService.ExpensePayCycle>('monthly');
+  const [nextPaymentDate, setNextPaymentDate] = useState(getToday());
+  const [showNextPaymentDatePicker, setShowNextPaymentDatePicker] = useState(false);
+  const [expenseCreatedAt, setExpenseCreatedAt] = useState(getToday()); // For one-time expenses
+  const [showExpenseCreatedAtPicker, setShowExpenseCreatedAtPicker] = useState(false);
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -203,18 +234,60 @@ export default function ModalScreen() {
       return;
     }
 
+    // Expense-specific validation
+    if (modalType === 'expense') {
+      if (!spendFrom) {
+        showAlert('Error', 'Please select a payment source');
+        return;
+      }
+
+      // Category is required according to API
+      if (!category) {
+        showAlert('Error', 'Please select a category');
+        return;
+      }
+
+      // Validate recurring fields
+      if (expenseType === 'recurring') {
+        if (!expensePayCycle) {
+          showAlert('Error', 'Please select a pay cycle for recurring expenses');
+          return;
+        }
+        if (!nextPaymentDate) {
+          showAlert('Error', 'Please select next payment date for recurring expenses');
+          return;
+        }
+        const today = getToday();
+        const nextPaymentDateOnly = new Date(nextPaymentDate);
+        nextPaymentDateOnly.setHours(0, 0, 0, 0);
+        if (nextPaymentDateOnly < today) {
+          showAlert('Error', 'Next payment date cannot be in the past');
+          return;
+        }
+      }
+    }
+
     setLoading(true);
     setErrorMessage('');
 
     try {
       if (modalType === 'expense') {
         // Create expense
-        const spendingDate = new Date().toISOString().split('T')[0]; // Format as YYYY-MM-DD
         const data: SpendingService.CreateSpendingData = {
           name: name.trim(),
           amount: parseFloat(amount),
-          category,
-          spendingDate,
+          category: category, // Required
+          spendFrom,
+          expenseType,
+          note: note.trim() || undefined, // Optional, can be empty string
+          // Add fields based on expense type
+          ...(expenseType === 'one-time' 
+            ? { createdAt: formatDate(expenseCreatedAt) } // For one-time, add createdAt
+            : { 
+                payCycle: expensePayCycle, // Required for recurring
+                nextPaymentDate: formatDate(nextPaymentDate), // Required for recurring
+              }
+          ),
         };
         await SpendingService.createSpending(data);
       } else {
@@ -249,6 +322,7 @@ export default function ModalScreen() {
       }
 
       // Success - go back
+      // The expenses page will automatically refresh on focus
       router.back();
     } catch (error: any) {
       const errorMsg = error?.message || `Failed to create ${modalType}`;
@@ -292,7 +366,7 @@ export default function ModalScreen() {
           </Text>
           <TextInput
             placeholder={modalType === 'expense' 
-              ? "e.g., Groceries, Gas, Coffee"
+              ? "e.g., Lunch, Electric Bill"
               : "e.g., Main Job, Gift Money"}
             placeholderTextColor="#99A7BC"
             value={name}
@@ -322,37 +396,298 @@ export default function ModalScreen() {
         </View>
 
         {modalType === 'expense' ? (
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Category</Text>
-            <View style={styles.categoryGrid}>
-              {EXPENSE_CATEGORIES.map((cat) => {
-                const isActive = category === cat.value;
-                return (
-                  <Pressable
-                    key={cat.value}
-                    style={[
-                      styles.categoryItem,
-                      isActive && styles.categoryItemActive,
-                    ]}
-                    onPress={() => {
-                      setCategory(cat.value);
+          <>
+            {/* Expense Type Selection */}
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Expense Type</Text>
+              <View style={styles.segment}>
+                {EXPENSE_TYPE_OPTIONS.map((option) => {
+                  const isActive = expenseType === option.value;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      style={[
+                        styles.segmentOption,
+                        isActive && styles.segmentOptionActive,
+                      ]}
+                      onPress={() => {
+                        setExpenseType(option.value as SpendingService.ExpenseType);
+                        setErrorMessage('');
+                      }}
+                      disabled={loading}
+                    >
+                      <Text
+                        style={[
+                          styles.segmentLabel,
+                          isActive && styles.segmentLabelActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Pay From Selection */}
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Pay From</Text>
+              <View style={styles.payFromGrid}>
+                {PAY_FROM_OPTIONS.map((option) => {
+                  const isActive = spendFrom === option.value;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      style={[
+                        styles.payFromOption,
+                        isActive && styles.payFromOptionActive,
+                        isActive && { borderColor: option.color },
+                      ]}
+                      onPress={() => {
+                        setSpendFrom(option.value as SpendingService.SpendFrom);
+                        setErrorMessage('');
+                      }}
+                      disabled={loading}
+                    >
+                      <Text
+                        style={[
+                          styles.payFromText,
+                          isActive && styles.payFromTextActive,
+                          isActive && { color: option.color },
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Category Selection */}
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Category</Text>
+              <View style={styles.categoryGrid}>
+                {EXPENSE_CATEGORIES.map((cat) => {
+                  const isActive = category === cat.value;
+                  return (
+                    <Pressable
+                      key={cat.value}
+                      style={[
+                        styles.categoryItem,
+                        isActive && styles.categoryItemActive,
+                      ]}
+                      onPress={() => {
+                        setCategory(cat.value);
+                        setErrorMessage('');
+                      }}
+                      disabled={loading}
+                    >
+                      <Text style={styles.categoryIcon}>{cat.icon}</Text>
+                      <Text
+                        style={[
+                          styles.categoryLabel,
+                          isActive && styles.categoryLabelActive,
+                        ]}
+                      >
+                        {cat.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Note Input (Optional) */}
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Note (Optional)</Text>
+              <TextInput
+                placeholder="Add a note about this expense..."
+                placeholderTextColor="#99A7BC"
+                value={note}
+                onChangeText={(text) => {
+                  setNote(text);
+                  setErrorMessage('');
+                }}
+                style={[styles.input, styles.textArea]}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+                editable={!loading}
+              />
+            </View>
+
+            {/* Created Date for One-Time Expenses */}
+            {expenseType === 'one-time' && (
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Date</Text>
+                {Platform.OS === 'web' ? (
+                  <WebDateInput
+                    value={expenseCreatedAt}
+                    onChange={(date) => {
+                      setExpenseCreatedAt(date);
                       setErrorMessage('');
                     }}
                     disabled={loading}
-                  >
-                    <Text
-                      style={[
-                        styles.categoryLabel,
-                        isActive && styles.categoryLabelActive,
-                      ]}
+                  />
+                ) : (
+                  <>
+                    <Pressable
+                      style={styles.dateButton}
+                      onPress={() => setShowExpenseCreatedAtPicker(true)}
+                      disabled={loading}
                     >
-                      {cat.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
+                      <Text style={styles.dateButtonText}>
+                        {expenseCreatedAt.toLocaleDateString()}
+                      </Text>
+                      <Text style={styles.dateButtonIcon}>📅</Text>
+                    </Pressable>
+                    {showExpenseCreatedAtPicker && (
+                      <View>
+                        {Platform.OS === 'ios' && (
+                          <View style={styles.datePickerActions}>
+                            <Pressable
+                              style={styles.datePickerButton}
+                              onPress={() => setShowExpenseCreatedAtPicker(false)}
+                            >
+                              <Text style={styles.datePickerButtonText}>Done</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                        <DateTimePicker
+                          value={expenseCreatedAt}
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          onChange={(event, selectedDate) => {
+                            if (Platform.OS === 'android') {
+                              setShowExpenseCreatedAtPicker(false);
+                            }
+                            if (event.type === 'set' && selectedDate) {
+                              setExpenseCreatedAt(selectedDate);
+                              setErrorMessage('');
+                            } else if (Platform.OS === 'android' && event.type === 'dismissed') {
+                              setShowExpenseCreatedAtPicker(false);
+                            }
+                          }}
+                        />
+                      </View>
+                    )}
+                  </>
+                )}
+              </View>
+            )}
+
+            {/* Recurring Fields */}
+            {expenseType === 'recurring' && (
+              <>
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>Pay Cycle</Text>
+                  <View style={styles.payCycleGrid}>
+                    {EXPENSE_PAY_CYCLE_OPTIONS.map((option) => {
+                      const isActive = expensePayCycle === option.value;
+                      return (
+                        <Pressable
+                          key={option.value}
+                          style={[
+                            styles.payCycleOption,
+                            isActive && styles.payCycleOptionActive,
+                          ]}
+                          onPress={() => {
+                            setExpensePayCycle(option.value);
+                            setErrorMessage('');
+                          }}
+                          disabled={loading}
+                        >
+                          <Text
+                            style={[
+                              styles.payCycleText,
+                              isActive && styles.payCycleTextActive,
+                            ]}
+                          >
+                            {option.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>Next Payment Date</Text>
+                  {Platform.OS === 'web' ? (
+                    <WebDateInput
+                      value={nextPaymentDate}
+                      onChange={(date) => {
+                        const today = getToday();
+                        const selectedDate = new Date(date);
+                        selectedDate.setHours(0, 0, 0, 0);
+                        if (selectedDate >= today) {
+                          setNextPaymentDate(date);
+                          setErrorMessage('');
+                        } else {
+                          setErrorMessage('Next payment date cannot be in the past');
+                        }
+                      }}
+                      minimumDate={getToday()}
+                      disabled={loading}
+                    />
+                  ) : (
+                    <>
+                      <Pressable
+                        style={styles.dateButton}
+                        onPress={() => setShowNextPaymentDatePicker(true)}
+                        disabled={loading}
+                      >
+                        <Text style={styles.dateButtonText}>
+                          {nextPaymentDate.toLocaleDateString()}
+                        </Text>
+                        <Text style={styles.dateButtonIcon}>📅</Text>
+                      </Pressable>
+                      {showNextPaymentDatePicker && (
+                        <View>
+                          {Platform.OS === 'ios' && (
+                            <View style={styles.datePickerActions}>
+                              <Pressable
+                                style={styles.datePickerButton}
+                                onPress={() => setShowNextPaymentDatePicker(false)}
+                              >
+                                <Text style={styles.datePickerButtonText}>Done</Text>
+                              </Pressable>
+                            </View>
+                          )}
+                          <DateTimePicker
+                            value={nextPaymentDate}
+                            mode="date"
+                            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                            minimumDate={getToday()}
+                            onChange={(event, selectedDate) => {
+                              if (Platform.OS === 'android') {
+                                setShowNextPaymentDatePicker(false);
+                              }
+                              if (event.type === 'set' && selectedDate) {
+                                const today = getToday();
+                                const selectedDateOnly = new Date(selectedDate);
+                                selectedDateOnly.setHours(0, 0, 0, 0);
+                                if (selectedDateOnly >= today) {
+                                  setNextPaymentDate(selectedDate);
+                                  setErrorMessage('');
+                                } else {
+                                  setErrorMessage('Next payment date cannot be in the past');
+                                }
+                              } else if (Platform.OS === 'android' && event.type === 'dismissed') {
+                                setShowNextPaymentDatePicker(false);
+                              }
+                            }}
+                          />
+                        </View>
+                      )}
+                    </>
+                  )}
+                </View>
+              </>
+            )}
+          </>
         ) : (
           <>
             <View style={styles.field}>
@@ -510,9 +845,28 @@ export default function ModalScreen() {
         )}
 
         <Pressable
-          style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+          style={[
+            styles.submitButton,
+            (loading || (!name.trim() || !amount || parseFloat(amount) <= 0 || 
+              (modalType === 'expense' && (
+                !spendFrom || 
+                !category ||
+                (expenseType === 'recurring' && (!expensePayCycle || !nextPaymentDate))
+              )))) &&
+            styles.submitButtonDisabled
+          ]}
           onPress={handleSubmit}
-          disabled={loading}
+          disabled={
+            loading ||
+            !name.trim() ||
+            !amount ||
+            parseFloat(amount) <= 0 ||
+            (modalType === 'expense' && (
+              !spendFrom || 
+              !category ||
+              (expenseType === 'recurring' && (!expensePayCycle || !nextPaymentDate))
+            ))
+          }
         >
           {loading ? (
             <ActivityIndicator color="#FFFFFF" />
@@ -680,17 +1034,20 @@ const styles = StyleSheet.create({
   },
   categoryItem: {
     width: '30%',
-    aspectRatio: 1,
+    minWidth: 100,
     borderRadius: 20,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    borderWidth: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderWidth: 2,
     borderColor: '#D3DFF4',
   },
   categoryItemActive: {
     borderColor: '#22B15C',
+    backgroundColor: '#ECFDF5',
     shadowColor: '#C6F0D8',
     shadowOpacity: 0.5,
     shadowRadius: 12,
@@ -698,15 +1055,87 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   categoryIcon: {
-    fontSize: 28,
+    fontSize: 32,
+    marginBottom: 4,
   },
   categoryLabel: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#6E7A90',
     fontWeight: '600',
+    textAlign: 'center',
   },
   categoryLabelActive: {
+    color: '#22B15C',
+    fontWeight: '700',
+  },
+  payFromGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  payFromOption: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#D3DFF4',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payFromOptionActive: {
+    backgroundColor: '#F8F9FF',
+    shadowColor: '#AFC7FF',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
+  },
+  payFromText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6E7A90',
+  },
+  payFromTextActive: {
+    fontWeight: '700',
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#E8F1FF',
+    borderRadius: 20,
+    padding: 4,
+    gap: 4,
+  },
+  toggleButton: {
+    flex: 1,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#AFC7FF',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
+  },
+  toggleButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6E7A90',
+  },
+  toggleButtonTextActive: {
     color: '#1C2533',
+    fontWeight: '700',
+  },
+  textArea: {
+    minHeight: 100,
+    paddingTop: 16,
+    paddingBottom: 16,
   },
   submitButton: {
     marginTop: 16,

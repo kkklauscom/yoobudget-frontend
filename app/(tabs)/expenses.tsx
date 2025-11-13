@@ -14,57 +14,78 @@ export default function ExpensesScreen() {
   const [expenses, setExpenses] = useState<Spending[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewCycle, setViewCycle] = useState<ViewCycleResponse | null>(null);
+  const [hasMainIncome, setHasMainIncome] = useState(true);
 
-  // Fetch view cycle to get cycle dates
-  const fetchViewCycle = useCallback(async () => {
-    try {
-      const cycle = await IncomeService.getViewCycle();
-      setViewCycle(cycle);
-      return cycle;
-    } catch (error) {
-      console.error('Failed to fetch view cycle:', error);
-      setViewCycle(null);
-      return null;
-    }
-  }, []);
-
-  // Fetch spending based on cycle dates
+  // Fetch spending for current cycle
   const fetchSpending = useCallback(async () => {
     try {
       setLoading(true);
       
-      // First get the cycle information
-      const cycle = await fetchViewCycle();
+      // Fetch current cycle expenses (API handles cycle calculation)
+      const cycleData = await SpendingService.getCurrentCycleExpenses();
       
-      if (!cycle || cycle.error) {
-        // No main income set, show empty state
+      if (cycleData.error) {
+        // No main income set or error
+        setHasMainIncome(false);
         setExpenses([]);
         setTotalSpent(0);
         setTotalCount(0);
+        setViewCycle(null);
         return;
       }
 
-      // Fetch spending for the current cycle
-      const spending = await SpendingService.getSpending({
-        start: cycle.cycleStart,
-        end: cycle.cycleEnd,
-      });
+      // Has main income
+      setHasMainIncome(true);
 
-      setExpenses(spending);
+      // Update expenses
+      setExpenses(cycleData.expenses || []);
       
       // Calculate totals
-      const spent = spending.reduce((sum, expense) => sum + expense.amount, 0);
+      const spent = (cycleData.expenses || []).reduce((sum, expense) => sum + expense.amount, 0);
       setTotalSpent(spent);
-      setTotalCount(spending.length);
+      setTotalCount(cycleData.expenses?.length || 0);
+
+      // Set view cycle info if available (for display purposes)
+      // Try to get payCycle from income view-cycle
+      try {
+        const incomeCycle = await IncomeService.getViewCycle();
+        if (!incomeCycle.error && incomeCycle.payCycle) {
+          setViewCycle({
+            cycleStart: cycleData.cycleStart,
+            cycleEnd: cycleData.cycleEnd,
+            payCycle: incomeCycle.payCycle,
+            remainingDays: incomeCycle.remainingDays,
+            totalIncome: incomeCycle.totalIncome,
+          });
+        } else {
+          setViewCycle({
+            cycleStart: cycleData.cycleStart,
+            cycleEnd: cycleData.cycleEnd,
+            payCycle: 'monthly',
+            remainingDays: 0,
+            totalIncome: 0,
+          });
+        }
+      } catch {
+        // If we can't get income cycle, just use expense cycle data
+        setViewCycle({
+          cycleStart: cycleData.cycleStart,
+          cycleEnd: cycleData.cycleEnd,
+          payCycle: 'monthly',
+          remainingDays: 0,
+          totalIncome: 0,
+        });
+      }
     } catch (error) {
       console.error('Failed to fetch spending:', error);
       setExpenses([]);
       setTotalSpent(0);
       setTotalCount(0);
+      setViewCycle(null);
     } finally {
       setLoading(false);
     }
-  }, [fetchViewCycle]);
+  }, []);
 
   // Fetch data when screen is focused
   useFocusEffect(
@@ -94,11 +115,11 @@ export default function ExpensesScreen() {
         <View style={styles.summaryCard}>
           <Text style={styles.summaryLabel}>Total Spent</Text>
           <Text style={styles.summaryValue}>
-            ${summary.totalSpent.toLocaleString()}
+            -${summary.totalSpent.toLocaleString()}
           </Text>
           <Text style={styles.summaryCaption}>
             {summary.totalCount} {summary.totalCount === 1 ? 'expense' : 'expenses'} recorded
-            {viewCycle && !viewCycle.error && (
+            {hasMainIncome && viewCycle && (
               <> • Current cycle</>
             )}
           </Text>
@@ -109,7 +130,7 @@ export default function ExpensesScreen() {
             <ActivityIndicator size="large" color="#29B461" />
             <Text style={styles.emptyTitle}>Loading expenses...</Text>
           </View>
-        ) : !viewCycle || viewCycle.error ? (
+        ) : !hasMainIncome ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyIcon}>
               <Text style={styles.plusLarge}>ℹ️</Text>
@@ -145,14 +166,35 @@ export default function ExpensesScreen() {
                 ]}
               >
                 <View style={styles.expenseInfo}>
-                  <Text style={styles.expenseName}>{expense.name}</Text>
+                  <View style={styles.expenseHeader}>
+                    <Text style={styles.expenseName}>{expense.name}</Text>
+                    {expense.expenseType === 'recurring' && (
+                      <View style={styles.recurringBadge}>
+                        <Text style={styles.recurringBadgeText}>RECURRING</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={styles.expenseCategory}>{expense.category}</Text>
-                  <Text style={styles.expenseDate}>
-                    {new Date(expense.spendingDate).toLocaleDateString()}
-                  </Text>
+                  {expense.note && (
+                    <Text style={styles.expenseNote}>{expense.note}</Text>
+                  )}
+                  <View style={styles.expenseMeta}>
+                    <Text style={styles.expenseDate}>
+                      {expense.expenseType === 'one-time' && expense.createdAt
+                        ? new Date(expense.createdAt).toLocaleDateString()
+                        : expense.expenseType === 'recurring' && expense.nextPaymentDate
+                        ? `Next: ${new Date(expense.nextPaymentDate).toLocaleDateString()}`
+                        : expense.created
+                        ? new Date(expense.created).toLocaleDateString()
+                        : new Date().toLocaleDateString()}
+                    </Text>
+                    <Text style={styles.expenseSpendFrom}>
+                      • {expense.spendFrom.charAt(0).toUpperCase() + expense.spendFrom.slice(1)}
+                    </Text>
+                  </View>
                 </View>
                 <Text style={styles.expenseAmount}>
-                  ${expense.amount.toLocaleString()}
+                  -${expense.amount.toLocaleString()}
                 </Text>
               </View>
             ))}
@@ -160,7 +202,7 @@ export default function ExpensesScreen() {
         )}
       </ScrollView>
 
-      {viewCycle && !viewCycle.error && (
+      {hasMainIncome && (
         <Link href="/modal?type=expense" asChild>
           <Pressable style={styles.fab}>
             <Text style={styles.fabText}>+</Text>
@@ -311,19 +353,55 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 4,
   },
+  expenseHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
   expenseName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1C2533',
+  },
+  recurringBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#E8F1FF',
+    borderWidth: 1,
+    borderColor: '#3383FF',
+  },
+  recurringBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#3383FF',
+    letterSpacing: 0.5,
   },
   expenseCategory: {
     fontSize: 14,
     color: '#6E7C91',
     fontWeight: '500',
   },
+  expenseNote: {
+    fontSize: 12,
+    color: '#99A7BC',
+    fontStyle: 'italic',
+  },
+  expenseMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexWrap: 'wrap',
+  },
   expenseDate: {
     fontSize: 12,
     color: '#99A7BC',
+  },
+  expenseSpendFrom: {
+    fontSize: 12,
+    color: '#99A7BC',
+    fontWeight: '500',
   },
   expenseAmount: {
     fontSize: 18,

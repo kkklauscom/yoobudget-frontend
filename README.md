@@ -10,7 +10,23 @@ A budget management application built with [Expo](https://expo.dev) and React Na
    npm install
    ```
 
-2. Start the app
+2. Configure environment variables
+
+   Create a `.env` file in the root directory:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Update the `API_BASE_URL` in `.env` to match your backend server:
+
+   ```env
+   API_BASE_URL=http://localhost:8000/api
+   ```
+
+   **Important**: The `.env` file is required for the app to connect to the backend API. All API calls use the `API_BASE_URL` from the `.env` file.
+
+3. Start the app
 
    ```bash
    npx expo start

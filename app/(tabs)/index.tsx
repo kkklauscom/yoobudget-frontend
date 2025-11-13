@@ -4,7 +4,9 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/contexts/AuthContext";
 import * as IncomeService from "@/services/income";
+import * as SpendingService from "@/services/spending";
 import type { Income, ViewCycleResponse } from "@/services/income";
+import type { Spending } from "@/services/spending";
 
 type Allocation = {
   name: string;
@@ -15,10 +17,9 @@ type Allocation = {
   accent: string;
 };
 
-type Expense = {
-  title: string;
-  amount: number;
-  type: "Need" | "Want";
+// Recurring expense type (from API)
+type RecurringExpense = Spending & {
+  expenseType: 'recurring';
 };
 
 // Color constants for allocations
@@ -33,11 +34,13 @@ export default function HomeScreen() {
   
   // State for data that will come from API
   const [allocations, setAllocations] = useState<Allocation[]>([]);
-  const [fixedExpenses, setFixedExpenses] = useState<Expense[]>([]);
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
+  const [allExpenses, setAllExpenses] = useState<Spending[]>([]); // All expenses for calculating spent
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [loading, setLoading] = useState(true);
   const [cycleLoading, setCycleLoading] = useState(true);
-  const [totalFixedExpenses, setTotalFixedExpenses] = useState<number>(0);
+  const [expensesLoading, setExpensesLoading] = useState(true);
+  const [totalRecurringExpenses, setTotalRecurringExpenses] = useState<number>(0);
   const [viewCycle, setViewCycle] = useState<ViewCycleResponse | null>(null);
   
   // Format current date
@@ -114,17 +117,55 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const fetchRecurringExpenses = useCallback(async () => {
+    try {
+      setExpensesLoading(true);
+      // Fetch current cycle expenses (includes recurring expenses)
+      const cycleData = await SpendingService.getCurrentCycleExpenses();
+      
+      if (cycleData.error || !cycleData.expenses) {
+        // No main income set or error
+        setRecurringExpenses([]);
+        setAllExpenses([]);
+        setTotalRecurringExpenses(0);
+        return;
+      }
+
+      // Store all expenses for calculating spent amounts
+      setAllExpenses(cycleData.expenses);
+
+      // Filter recurring expenses
+      const recurring = cycleData.expenses.filter(
+        (expense) => expense.expenseType === 'recurring'
+      ) as RecurringExpense[];
+
+      setRecurringExpenses(recurring);
+      
+      // Calculate total
+      const total = recurring.reduce((sum, expense) => sum + expense.amount, 0);
+      setTotalRecurringExpenses(total);
+    } catch (error) {
+      console.error('Failed to fetch recurring expenses:', error);
+      setRecurringExpenses([]);
+      setAllExpenses([]);
+      setTotalRecurringExpenses(0);
+    } finally {
+      setExpensesLoading(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       fetchIncomes();
       fetchViewCycle();
-    }, [fetchIncomes, fetchViewCycle])
+      fetchRecurringExpenses();
+    }, [fetchIncomes, fetchViewCycle, fetchRecurringExpenses])
   );
   
   const summary = useMemo(
     () => ({
       income: viewCycle?.totalIncome ?? 0,
-      fixedExpenses: totalFixedExpenses,
+      recurringExpenses: totalRecurringExpenses,
       date: currentDate,
       currentSavings: user?.currentSavings ?? 0,
       payCycle: viewCycle?.payCycle || 'monthly',
@@ -133,13 +174,40 @@ export default function HomeScreen() {
       remainingDays: viewCycle?.remainingDays ?? 0,
       hasMainIncome: viewCycle !== null && !viewCycle.error,
     }),
-    [viewCycle, totalFixedExpenses, currentDate, user?.currentSavings]
+    [viewCycle, totalRecurringExpenses, currentDate, user?.currentSavings]
   );
+
+  // Calculate spent amounts by category (needs, wants, savings)
+  const spentByCategory = useMemo(() => {
+    const spent = {
+      needs: 0,
+      wants: 0,
+      savings: 0,
+    };
+
+    // Calculate spent from all expenses based on spendFrom field
+    allExpenses.forEach((expense) => {
+      // spendFrom is already 'needs' | 'wants' | 'savings'
+      const category = expense.spendFrom;
+      if (category === 'needs' || category === 'wants' || category === 'savings') {
+        spent[category] += expense.amount;
+      }
+    });
+
+    return spent;
+  }, [allExpenses]);
 
   // Generate allocations from user budget ratio if available
   const displayAllocations = useMemo(() => {
     if (allocations.length > 0) {
-      return allocations;
+      // If allocations come from API, update spent amounts from expenses
+      return allocations.map((allocation) => {
+        const categoryKey = allocation.name.toLowerCase() as keyof typeof spentByCategory;
+        return {
+          ...allocation,
+          spent: spentByCategory[categoryKey] || allocation.spent,
+        };
+      });
     }
     
     // If no allocations from API, create from user budget ratio
@@ -149,7 +217,7 @@ export default function HomeScreen() {
           name: "Needs",
           percentage: user.budgetRatio.needs,
           budget: Math.round((summary.income * user.budgetRatio.needs) / 100),
-          spent: 0, // Will come from API
+          spent: spentByCategory.needs,
           color: ALLOCATION_COLORS.needs.color,
           accent: ALLOCATION_COLORS.needs.accent,
         },
@@ -157,7 +225,7 @@ export default function HomeScreen() {
           name: "Wants",
           percentage: user.budgetRatio.wants,
           budget: Math.round((summary.income * user.budgetRatio.wants) / 100),
-          spent: 0, // Will come from API
+          spent: spentByCategory.wants,
           color: ALLOCATION_COLORS.wants.color,
           accent: ALLOCATION_COLORS.wants.accent,
         },
@@ -165,7 +233,7 @@ export default function HomeScreen() {
           name: "Savings",
           percentage: user.budgetRatio.savings,
           budget: Math.round((summary.income * user.budgetRatio.savings) / 100),
-          spent: 0, // Will come from API
+          spent: spentByCategory.savings,
           color: ALLOCATION_COLORS.savings.color,
           accent: ALLOCATION_COLORS.savings.accent,
         },
@@ -173,7 +241,7 @@ export default function HomeScreen() {
     }
     
     return [];
-  }, [allocations, user?.budgetRatio, summary.income]);
+  }, [allocations, user?.budgetRatio, summary.income, spentByCategory]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -214,7 +282,7 @@ export default function HomeScreen() {
             )}
             <View style={styles.cycleFooter}>
               <Text style={styles.cycleIncome}>
-                ${summary.income.toLocaleString()}
+                +${summary.income.toLocaleString()}
               </Text>
               <Text style={styles.cycleRemainingDays}>
                 {summary.remainingDays} days remaining
@@ -291,7 +359,7 @@ export default function HomeScreen() {
                     </View>
                     <View style={styles.incomeRight}>
                       <Text style={styles.incomeAmount}>
-                        ${income.amount.toLocaleString()}
+                        +${income.amount.toLocaleString()}
                       </Text>
                       {!income.isMain && income.payCycle !== 'one-time' && (
                         <Pressable
@@ -401,37 +469,63 @@ export default function HomeScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Fixed Expenses</Text>
-            <Link href="/modal" asChild>
+            <Text style={styles.sectionTitle}>RECURRING</Text>
+            <Link href="/modal?type=expense" asChild>
               <Pressable style={styles.sectionAction}>
                 <Text style={styles.sectionActionText}>+</Text>
               </Pressable>
             </Link>
           </View>
           <View style={styles.sectionCard}>
-            {fixedExpenses.length === 0 ? (
+            {expensesLoading ? (
+              <View style={styles.emptyState}>
+                <ActivityIndicator size="small" color="#FF4D67" />
+                <Text style={styles.emptyStateText}>Loading recurring expenses...</Text>
+              </View>
+            ) : recurringExpenses.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>
-                  No fixed expenses yet
+                  No recurring expenses yet
                 </Text>
                 <Text style={styles.emptyStateSubtext}>
-                  Add your first fixed expense to get started
+                  Add your first recurring expense to get started
                 </Text>
               </View>
             ) : (
-              fixedExpenses.map((expense) => (
-              <View key={expense.title} style={styles.expenseRow}>
+              recurringExpenses.map((expense, index) => (
+              <View 
+                key={expense._id} 
+                style={[
+                  styles.expenseRow,
+                  index === recurringExpenses.length - 1 && styles.expenseRowLast
+                ]}
+              >
                 <View style={styles.expenseInfo}>
                   <View style={styles.expenseIcon}>
-                    <Text style={styles.expenseIconText}>↗</Text>
+                    <Text style={styles.expenseIconText}>🔄</Text>
                   </View>
-                  <View>
-                    <Text style={styles.expenseTitle}>{expense.title}</Text>
-                    <Text style={styles.expenseType}>{expense.type}</Text>
+                  <View style={styles.expenseDetails}>
+                    <Text style={styles.expenseTitle}>{expense.name}</Text>
+                    <View style={styles.expenseMeta}>
+                      <Text style={styles.expenseCategory}>{expense.category}</Text>
+                      {expense.payCycle && (
+                        <Text style={styles.expensePayCycle}>
+                          • {expense.payCycle.charAt(0).toUpperCase() + expense.payCycle.slice(1)}
+                        </Text>
+                      )}
+                      {expense.nextPaymentDate && (
+                        <Text style={styles.expenseDate}>
+                          • Next: {new Date(expense.nextPaymentDate).toLocaleDateString()}
+                        </Text>
+                      )}
+                    </View>
+                    {expense.note && (
+                      <Text style={styles.expenseNote}>{expense.note}</Text>
+                    )}
                   </View>
                 </View>
                 <Text style={styles.expenseAmount}>
-                  ${expense.amount.toLocaleString()}
+                  -${expense.amount.toLocaleString()}
                 </Text>
               </View>
             ))
@@ -690,28 +784,62 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F4F8",
+  },
+  expenseRowLast: {
+    borderBottomWidth: 0,
   },
   expenseInfo: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 12,
+    flex: 1,
   },
   expenseIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#EAF7EF",
+    backgroundColor: "#FFE6E9",
     alignItems: "center",
     justifyContent: "center",
   },
   expenseIconText: {
     fontSize: 18,
-    color: "#21C17A",
+  },
+  expenseDetails: {
+    flex: 1,
+    gap: 4,
   },
   expenseTitle: {
     fontSize: 16,
     fontWeight: "600",
     color: "#1B1B33",
+  },
+  expenseMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flexWrap: "wrap",
+  },
+  expenseCategory: {
+    fontSize: 12,
+    color: "#7A889C",
+    fontWeight: "500",
+  },
+  expensePayCycle: {
+    fontSize: 12,
+    color: "#7A889C",
+  },
+  expenseDate: {
+    fontSize: 12,
+    color: "#7A889C",
+  },
+  expenseNote: {
+    fontSize: 12,
+    color: "#99A7BC",
+    fontStyle: "italic",
   },
   expenseType: {
     fontSize: 12,
@@ -720,7 +848,7 @@ const styles = StyleSheet.create({
   expenseAmount: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#1B1B33",
+    color: "#FF4D67",
   },
   incomeRow: {
     flexDirection: "row",
