@@ -270,16 +270,17 @@ export default function HomeScreen() {
         ) : summary.hasMainIncome ? (
           <View style={styles.cycleCard}>
             <View style={styles.cycleHeader}>
-              <Text style={styles.cycleTitle}>Current Cycle</Text>
+              {summary.cycleStart && summary.cycleEnd ? (
+                <Text style={styles.cycleTitle}>
+                  {formatDateRange(summary.cycleStart, summary.cycleEnd)}
+                </Text>
+              ) : (
+                <Text style={styles.cycleTitle}>Current Cycle</Text>
+              )}
               <Text style={styles.cycleType}>
                 {getPayCycleLabel(summary.payCycle)}
               </Text>
             </View>
-            {summary.cycleStart && summary.cycleEnd && (
-              <Text style={styles.cycleDateRange}>
-                {formatDateRange(summary.cycleStart, summary.cycleEnd)}
-              </Text>
-            )}
             <View style={styles.cycleFooter}>
               <Text style={styles.cycleIncome}>
                 +${summary.income.toLocaleString()}
@@ -608,23 +609,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cycleTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "700",
     color: "#FFFFFF",
-    textTransform: "uppercase",
-    letterSpacing: 1,
+    letterSpacing: 0.5,
+    flex: 1,
   },
   cycleType: {
     fontSize: 14,
     fontWeight: "600",
     color: "#E6F0FF",
     textTransform: "capitalize",
-  },
-  cycleDateRange: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#FFFFFF",
-    textAlign: "center",
+    marginLeft: 12,
   },
   cycleFooter: {
     flexDirection: "row",

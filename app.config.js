@@ -50,11 +50,12 @@ module.exports = {
       reactCompiler: true,
     },
     extra: {
-      // API base URL from .env file
+      // API base URL from .env file or Vercel environment variables
       // This is loaded via dotenv.config() at the top of this file
-      // The value comes from .env file: API_BASE_URL=http://localhost:8000/api
-      // IMPORTANT: If API_BASE_URL is not set in .env, this will be undefined
-      // and the app will throw an error in config/api.ts
+      // The value comes from:
+      // 1. .env file: API_BASE_URL=http://localhost:8000/api (for local development)
+      // 2. Vercel Environment Variables: API_BASE_URL (for production)
+      // If not set, config/api.ts will use a default value
       apiBaseUrl: process.env.API_BASE_URL,
     },
   },

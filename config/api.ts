@@ -5,17 +5,27 @@
  * The API_BASE_URL is loaded from:
  * 1. Constants.expoConfig?.extra?.apiBaseUrl (from app.config.js, which reads .env file)
  * 2. Constants.manifest?.extra?.apiBaseUrl (legacy format, for older Expo versions)
+ * 3. Default fallback: "http://localhost:8000/api" (for local development)
  *
  * IMPORTANT: All API calls MUST use API_CONFIG endpoints, which are automatically
- * constructed from the API_BASE_URL loaded from .env file.
+ * constructed from the API_BASE_URL.
  *
  * To configure:
  * 1. Create/update .env file in the root directory
  * 2. Add: API_BASE_URL=http://localhost:8000/api
  * 3. Restart the Expo server (app.config.js is only read at startup)
+ *
+ * For production (Vercel):
+ * - Set API_BASE_URL in Vercel Environment Variables
+ * - The app will use the environment variable if available
+ * - Otherwise, it will use the default value (for development)
  */
 
 import Constants from "expo-constants";
+
+// Default API base URL (used when .env file is not configured)
+// Change this to your production API URL if needed
+const DEFAULT_API_BASE_URL = "http://localhost:8000/api";
 
 // Get API base URL from environment variable (loaded via app.config.js from .env file)
 const getApiBaseUrl = (): string => {
@@ -30,43 +40,46 @@ const getApiBaseUrl = (): string => {
     apiBaseUrl = Constants.manifest.extra.apiBaseUrl;
   }
 
-  // 3. Validate that we have a valid URL
+  // 3. Try process.env directly (fallback for some environments)
+  if (
+    !apiBaseUrl &&
+    typeof process !== "undefined" &&
+    process.env?.API_BASE_URL
+  ) {
+    apiBaseUrl = process.env.API_BASE_URL;
+  }
+
+  // 4. If still not found, use default and warn
   if (!apiBaseUrl || apiBaseUrl.trim() === "") {
-    const errorMessage =
-      "❌ ERROR: API_BASE_URL is not configured!\n\n" +
-      "The API_BASE_URL must be set in your .env file.\n\n" +
-      "Steps to fix:\n" +
-      "1. Ensure .env file exists in the root directory\n" +
-      "2. Add the following line to .env:\n" +
-      "   API_BASE_URL=http://localhost:8000/api\n" +
-      "3. Stop the Expo server (Ctrl+C)\n" +
-      "4. Restart the Expo server: npm start\n\n" +
-      "Note: The app.config.js file is only read when the server starts.\n" +
-      "You MUST restart the server after modifying .env file.";
-
-    console.error(errorMessage);
-
-    // In development, throw error to make it obvious
     if (__DEV__) {
-      throw new Error(
-        "API_BASE_URL is not configured. Please set it in your .env file and restart the Expo server."
+      console.warn(
+        "⚠️  WARNING: API_BASE_URL is not configured in .env file.\n" +
+          "Using default fallback: " +
+          DEFAULT_API_BASE_URL +
+          "\n\n" +
+          "To configure:\n" +
+          "1. Ensure .env file exists in the root directory\n" +
+          "2. Add: API_BASE_URL=http://localhost:8000/api\n" +
+          "3. Restart the Expo server (stop with Ctrl+C, then run: npm start)\n" +
+          "4. The app.config.js file is only read when the server starts\n\n" +
+          "For production (Vercel):\n" +
+          "- Set API_BASE_URL in Vercel Environment Variables\n" +
+          "- The app will use the environment variable if available"
       );
     }
-
-    // In production, return empty string (will cause API calls to fail, but app won't crash)
-    return "";
+    return DEFAULT_API_BASE_URL;
   }
 
   // Log successful load (only in development)
   if (__DEV__) {
-    console.log("✅ API_BASE_URL loaded from .env:", apiBaseUrl);
+    console.log("✅ API_BASE_URL loaded:", apiBaseUrl);
     console.log("   Source: Constants.expoConfig?.extra?.apiBaseUrl");
   }
 
   return apiBaseUrl;
 };
 
-// Get API base URL from .env file (throws error in development if not configured)
+// Get API base URL (uses default value if not configured)
 export const API_BASE_URL = getApiBaseUrl();
 
 export const API_CONFIG = {
